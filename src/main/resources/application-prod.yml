@@ -1,4 +1,4 @@
-# =====================================================================
+﻿# =====================================================================
 # 生产 / 演示环境配置（profile = prod）
 # 启动方式（任选其一）：
 #   1) IDEA 运行配置：Active profiles = prod
@@ -19,7 +19,7 @@ spring:
       api-key: ${DASHSCOPE_API_KEY:your-api-key}
       chat:
         options:
-          model: ${DASHSCOPE_CHAT_MODEL:qwen-flash}
+          model: ${DASHSCOPE_CHAT_MODEL:qwen-plus}
           temperature: 0.7
     # 生产环境默认开启 MCP 服务端，对外暴露技能集
     mcp:

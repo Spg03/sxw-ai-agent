@@ -41,6 +41,9 @@ public class ToolCallAgent extends ReActAgent {
     // 禁用 Spring AI 内置的工具调用机制，自己维护选项和消息上下文
     private final ChatOptions chatOptions;
 
+    // 最近一次助手输出的纯文本（无工具调用时即为最终答案）
+    private String lastAssistantText = "";
+
     public ToolCallAgent(ToolCallback[] availableTools) {
         super();
         this.availableTools = availableTools;
@@ -70,7 +73,7 @@ public class ToolCallAgent extends ReActAgent {
         try {
             ChatResponse chatResponse = getChatClient().prompt(prompt)
                     .system(getSystemPrompt())
-                    .tools(availableTools)
+                    .toolCallbacks(availableTools)
                     .call()
                     .chatResponse();
             // 记录响应，用于等下 Act
@@ -88,10 +91,12 @@ public class ToolCallAgent extends ReActAgent {
                     .map(toolCall -> String.format("工具名称：%s，参数：%s", toolCall.name(), toolCall.arguments()))
                     .collect(Collectors.joining("\n"));
             log.info(toolCallInfo);
-            // 如果不需要调用工具，返回 false
+            // 如果不需要调用工具，说明助手已经给出最终答案：保存文本并结束循环
             if (toolCallList.isEmpty()) {
                 // 只有不调用工具时，才需要手动记录助手消息
                 getMessageList().add(assistantMessage);
+                this.lastAssistantText = result == null ? "" : result;
+                setState(AgentState.FINISHED);
                 return false;
             } else {
                 // 需要调用工具时，无需记录助手消息，因为调用工具时会自动记录
@@ -101,6 +106,25 @@ public class ToolCallAgent extends ReActAgent {
             log.error(getName() + "的思考过程遇到了问题：" + e.getMessage());
             getMessageList().add(new AssistantMessage("处理时遇到了错误：" + e.getMessage()));
             return false;
+        }
+    }
+
+    /**
+     * 单步执行：思考 + 行动。
+     * 当思考无需调用工具时，将助手生成的最终文本作为该步结果返回，
+     * 让前端能直接展示自然语言答案，而不是占位符 “思考完成 - 无需行动”。
+     */
+    @Override
+    public String step() {
+        try {
+            boolean shouldAct = think();
+            if (!shouldAct) {
+                return StrUtil.isNotBlank(lastAssistantText) ? lastAssistantText : "思考完成 - 无需行动";
+            }
+            return act();
+        } catch (Exception e) {
+            log.error("step failed", e);
+            return "步骤执行失败：" + e.getMessage();
         }
     }
 

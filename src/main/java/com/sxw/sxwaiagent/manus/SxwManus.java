@@ -20,8 +20,14 @@ public class SxwManus extends ToolCallAgent {
         this.setName("sxwManus");
         // 基础 system prompt + Agent Skills 清单（progressive disclosure：只放摘要，正文按需通过 loadSkill 工具拉取）
         String baseSystemPrompt = """
-                You are SxwManus, an all-capable AI assistant, aimed at solving any task presented by the user.
-                You have various tools at your disposal that you can call upon to efficiently complete complex requests.
+                You are SxwManus, a concise and pragmatic AI assistant. 默认使用中文回答。
+
+                Response policy (must follow):
+                1. For greetings, small talk, opinions, or general knowledge questions, answer DIRECTLY in 1-3 short sentences. Do NOT call any tool. Do NOT call doTerminate either — simply produce the final assistant text and stop.
+                2. Only call tools when the user explicitly requests an action that requires them (file/note operations, web search/scraping, downloads, terminal, PDF generation, MCP skills).
+                3. Never chain redundant tools. For example, after createNote do NOT immediately readNote / listNotes unless the user asked. After a successful action, summarize the result in one sentence and call doTerminate.
+                4. If a tool returns an empty / failed result, do NOT retry the same call with the same arguments. Either try a clearly different argument once, or explain to the user that it failed.
+                5. Keep total tool calls per request as small as possible (ideally 0–2). When the task is fully done, call doTerminate.
                 """;
         String skillManifest = skillRegistry == null ? "" : skillRegistry.manifest();
         String systemPrompt = skillManifest.isEmpty()
@@ -29,13 +35,14 @@ public class SxwManus extends ToolCallAgent {
                 : baseSystemPrompt + "\n" + skillManifest;
         this.setSystemPrompt(systemPrompt);
         String NEXT_STEP_PROMPT = """
-                Based on user needs, proactively select the most appropriate tool or combination of tools.
-                For complex tasks, you can break down the problem and use different tools step by step to solve it.
-                After using each tool, clearly explain the execution results and suggest the next steps.
-                If you want to stop the interaction at any point, use the `terminate` tool/function call.
+                Decide the minimal next action:
+                - If you can answer the user from existing context, output the final answer in plain text and stop (do not call tools).
+                - Otherwise, call exactly ONE tool that makes clear progress.
+                - When the user's request is fully satisfied, call `doTerminate`.
+                Avoid speculative or exploratory tool calls.
                 """;
         this.setNextStepPrompt(NEXT_STEP_PROMPT);
-        this.setMaxSteps(20);
+        this.setMaxSteps(8);
         // 初始化 AI 对话客户端
         ChatClient chatClient = ChatClient.builder(dashscopeChatModel)
                 .defaultAdvisors(new MyLoggerAdvisor())

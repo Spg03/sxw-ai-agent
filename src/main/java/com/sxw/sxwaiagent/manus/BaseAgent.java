@@ -5,6 +5,7 @@ import com.sxw.sxwaiagent.manus.model.AgentState;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 抽象基础代理类，用于管理代理状态和执行流程。
@@ -57,6 +59,30 @@ public abstract class BaseAgent {
      * 但生产路径会被 Spring 容器注入有界、命名、可观测的 {@code agentTaskExecutor}。
      */
     private Executor executor = ForkJoinPool.commonPool();
+
+    /**
+     * 运行结束后的回调钩子。
+     * 供控制层在会话结束时持久化 {@code messageList}，实现跨请求记忆。
+     * 调用点：同步 run 的 finally、流式 async 任务的 finally、SseEmitter 的 onCompletion / onTimeout；
+     * 通过 {@link #onFinishedFired} 保证全局只跑一次，避免重复保存 / 重复覆盖。
+     */
+    private Runnable onFinished;
+    private final AtomicBoolean onFinishedFired = new AtomicBoolean(false);
+
+    public void setOnFinished(Runnable onFinished) {
+        this.onFinished = onFinished;
+    }
+
+    private void invokeOnFinishedSafely() {
+        Runnable hook = this.onFinished;
+        if (hook == null) return;
+        if (!onFinishedFired.compareAndSet(false, true)) return; // 只跑一次
+        try {
+            hook.run();
+        } catch (Exception ex) {
+            log.warn("agent={} onFinished hook failed: {}", name, ex.getMessage());
+        }
+    }
 
     /**
      * 安全裁剪历史：保留首条 {@code SystemMessage}（若有）与最近的 {@link #maxHistoryMessages} 条。
@@ -127,7 +153,8 @@ public abstract class BaseAgent {
             log.error("error executing agent", e);
             return "执行错误" + e.getMessage();
         } finally {
-            // 3、清理资源
+            // 3、走一次持久化钩子，再清理资源
+            invokeOnFinishedSafely();
             this.cleanup();
         }
     }
@@ -168,22 +195,31 @@ public abstract class BaseAgent {
             List<String> results = new ArrayList<>();
             try {
                 // 执行循环
+                int loopedSteps = 0;
                 for (int i = 0; i < maxSteps && state != AgentState.FINISHED; i++) {
                     int stepNumber = i + 1;
                     currentStep = stepNumber;
+                    loopedSteps = stepNumber;
                     log.info("Executing step {}/{}", stepNumber, maxSteps);
                     // 单步执行
                     String stepResult = step();
                     String result = "Step " + stepNumber + ": " + stepResult;
                     results.add(result);
-                    // 输出当前每一步的结果到 SSE
-                    sseEmitter.send(result);
+                    // 作为“思考过程”中间事件输出到 SSE，前端能在 “思考过程”面板里折叠展示
+                    sseEmitter.send(SseEmitter.event().name("step").data(result));
                 }
-                // 检查是否超出步骤限制
-                if (currentStep >= maxSteps) {
+                // 检查是否超出步骤限制（仅在从未主动 FINISHED 时才提示）
+                boolean reachedMax = state != AgentState.FINISHED && loopedSteps >= maxSteps;
+                if (reachedMax) {
                     state = AgentState.FINISHED;
                     results.add("Terminated: Reached max steps (" + maxSteps + ")");
-                    sseEmitter.send("执行结束：达到最大步骤（" + maxSteps + "）");
+                    sseEmitter.send(SseEmitter.event().name("step")
+                            .data("执行结束：达到最大步骤（" + maxSteps + "）"));
+                }
+                // 发送 “final” 事件：从会话历史中取最后一条助手文本作为自然语言答案
+                String finalAnswer = extractFinalAssistantText();
+                if (StrUtil.isNotBlank(finalAnswer)) {
+                    sseEmitter.send(SseEmitter.event().name("final").data(finalAnswer));
                 }
                 // 正常完成
                 sseEmitter.complete();
@@ -191,13 +227,15 @@ public abstract class BaseAgent {
                 state = AgentState.ERROR;
                 log.error("error executing agent", e);
                 try {
-                    sseEmitter.send("执行错误：" + e.getMessage());
+                    sseEmitter.send(SseEmitter.event().name("error").data("执行错误：" + e.getMessage()));
                     sseEmitter.complete();
                 } catch (IOException ex) {
                     sseEmitter.completeWithError(ex);
                 }
             } finally {
-                // 3、清理资源
+                // 3、企业持久化钩子优先在这里调用 —— 后面的 sseEmitter.onCompletion 可能因
+                //   客户端提前断开、容器调度等原因不被触发，这里是确定性的路径。
+                invokeOnFinishedSafely();
                 this.cleanup();
             }
         }, executor);
@@ -205,6 +243,7 @@ public abstract class BaseAgent {
         // 设置超时回调
         sseEmitter.onTimeout(() -> {
             this.state = AgentState.ERROR;
+            invokeOnFinishedSafely();
             this.cleanup();
             log.warn("SSE connection timeout");
         });
@@ -213,6 +252,7 @@ public abstract class BaseAgent {
             if (this.state == AgentState.RUNNING) {
                 this.state = AgentState.FINISHED;
             }
+            invokeOnFinishedSafely();
             this.cleanup();
             log.info("SSE connection completed");
         });
@@ -225,6 +265,23 @@ public abstract class BaseAgent {
      * @return
      */
     public abstract String step();
+
+    /**
+     * 从会话历史中提取最近一条不为空的 {@link AssistantMessage} 文本。
+     * 用于在流式运行结束后给前端返回一个干净的“最终答案”，避免用户只看到 “Step N: 工具X 返回” 这种调试信息。
+     */
+    protected String extractFinalAssistantText() {
+        for (int i = messageList.size() - 1; i >= 0; i--) {
+            Message m = messageList.get(i);
+            if (m instanceof AssistantMessage am) {
+                String text = am.getText();
+                if (text != null && !text.isBlank()) {
+                    return text;
+                }
+            }
+        }
+        return "";
+    }
 
     /**
      * 清理资源

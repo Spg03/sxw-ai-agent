@@ -55,6 +55,36 @@
       background: rgba(15, 23, 42, 0.7);
       padding: 0 4px; border-radius: 3px; font-size: 0.9em;
     }
+    /* 思考过程折叠面板 */
+    details.thinking {
+      margin-bottom: 6px;
+      border: 1px solid rgba(148,163,184,0.18);
+      border-radius: 6px;
+      background: rgba(15,23,42,0.45);
+    }
+    details.thinking > summary {
+      cursor: pointer; list-style: none;
+      padding: 4px 10px;
+      font-size: 11px; color: #94a3b8;
+      user-select: none;
+    }
+    details.thinking > summary::-webkit-details-marker { display: none; }
+    details.thinking > summary::before {
+      content: "▸"; display: inline-block; margin-right: 6px;
+      transition: transform 0.15s ease;
+    }
+    details.thinking[open] > summary::before { transform: rotate(90deg); }
+    .thinking-body {
+      padding: 4px 10px 8px 10px;
+      font-size: 12px;
+      color: #94a3b8;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap; word-break: break-word;
+      max-height: 260px; overflow: auto;
+    }
+    .thinking-body .step-line { padding: 2px 0; border-bottom: 1px dashed rgba(148,163,184,0.12); }
+    .thinking-body .step-line:last-child { border-bottom: none; }
+    .final-answer { white-space: pre-wrap; word-break: break-word; }
   </style>
 </head>
 <body class="min-h-screen">
@@ -76,7 +106,8 @@
       </div>
     </div>
     <nav class="max-w-7xl mx-auto px-6 pb-3 flex gap-2">
-      <button data-tab="chat"    class="tab-btn tab-active px-4 py-1.5 rounded-md text-sm">智能体对话</button>
+      <button data-tab="chat"    class="tab-btn tab-active px-4 py-1.5 rounded-md text-sm">Manus 智能体</button>
+      <button data-tab="love"    class="tab-btn px-4 py-1.5 rounded-md text-sm text-slate-300 hover:bg-slate-800">恋爱大师</button>
       <button data-tab="notes"   class="tab-btn px-4 py-1.5 rounded-md text-sm text-slate-300 hover:bg-slate-800">笔记</button>
       <button data-tab="skills"  class="tab-btn px-4 py-1.5 rounded-md text-sm text-slate-300 hover:bg-slate-800">Skills</button>
       <button data-tab="metrics" class="tab-btn px-4 py-1.5 rounded-md text-sm text-slate-300 hover:bg-slate-800">监控面板</button>
@@ -92,7 +123,11 @@
             <span class="text-sm text-slate-300">Manus 智能体</span>
             <span class="text-[11px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300">SSE 流式</span>
           </div>
-          <button id="btn-clear-chat" class="text-xs text-slate-400 hover:text-slate-200">清空</button>
+          <div class="flex items-center gap-3">
+            <span id="chat-id-tag" class="text-[11px] text-slate-500" title="当前会话 ID"></span>
+            <button id="btn-new-chat" class="text-xs text-slate-400 hover:text-slate-200">新会话</button>
+            <button id="btn-clear-chat" class="text-xs text-slate-400 hover:text-slate-200">清屏</button>
+          </div>
         </div>
         <div id="chat-list" class="flex-1 overflow-y-auto scroll-thin px-5 py-4 space-y-4">
           <div class="text-center text-slate-500 text-sm pt-12">
@@ -111,6 +146,42 @@
           </form>
           <div class="text-[11px] text-slate-500 mt-1">
             后端：<code>/api/ai/manus/chat</code> · 工具：笔记 / 终端(沙箱) / 高德地图等 MCP 技能
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========= LoveApp ========= -->
+    <section id="tab-love" class="tab-pane hidden">
+      <div class="glass rounded-xl flex flex-col h-[calc(100vh-200px)]">
+        <div class="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-sm text-slate-300">恋爱大师 LoveApp</span>
+            <span class="text-[11px] px-2 py-0.5 rounded bg-pink-500/20 text-pink-300">RAG · SSE 流式</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span id="love-id-tag" class="text-[11px] text-slate-500" title="当前会话 ID"></span>
+            <button id="btn-new-love" class="text-xs text-slate-400 hover:text-slate-200">新会话</button>
+            <button id="btn-clear-love" class="text-xs text-slate-400 hover:text-slate-200">清屏</button>
+          </div>
+        </div>
+        <div id="love-list" class="flex-1 overflow-y-auto scroll-thin px-5 py-4 space-y-4">
+          <div class="text-center text-slate-500 text-sm pt-12">
+            💌 试试：<code class="px-2 py-0.5 rounded bg-slate-800 text-pink-300">最近和对象吵架了，怎么办？</code>
+          </div>
+        </div>
+        <div class="px-4 py-3 border-t border-slate-800">
+          <form id="love-form" class="flex gap-2">
+            <input id="love-input" type="text" maxlength="2000"
+                   placeholder="说说你的烦恼，回车发送…"
+                   class="flex-1 bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-pink-500" />
+            <button id="love-send" type="submit"
+                    class="px-4 py-2 rounded-md bg-pink-500 hover:bg-pink-400 text-sm font-medium">
+              发送
+            </button>
+          </form>
+          <div class="text-[11px] text-slate-500 mt-1">
+            后端：<code>/api/ai/love_app/chat/sse_emitter</code> · 默认启用 ChatMemory 会话记忆 + RAG 知识库
           </div>
         </div>
       </div>
@@ -268,45 +339,131 @@
     const chatInput = $("#chat-input");
     const chatBtn   = $("#chat-send");
 
-    function appendBubble(text, who) {
+    function appendUserBubble(text) {
       const wrap = document.createElement("div");
-      wrap.className = "flex " + (who === "user" ? "justify-end" : "justify-start");
+      wrap.className = "flex justify-end";
       const inner = document.createElement("div");
-      inner.className = "max-w-[80%] rounded-xl px-4 py-2 text-sm whitespace-pre-wrap markdown "
-        + (who === "user" ? "bubble-user text-white" : "bubble-bot text-slate-100");
+      inner.className = "max-w-[80%] rounded-xl px-4 py-2 text-sm whitespace-pre-wrap markdown bubble-user text-white";
       inner.textContent = text;
       wrap.appendChild(inner);
       chatList.appendChild(wrap);
       chatList.scrollTop = chatList.scrollHeight;
-      return inner;
     }
+
+    /**
+     * 创建一个机器人气泡：
+     *  - 上方 <details class="thinking"> 折叠“思考过程”（默认收起，需要才展开）
+     *  - 下方 .final-answer 是最终自然语言答案区域
+     *  - 返回供 SSE 事件处理器使用的控制句柄
+     */
+    function appendBotBubble() {
+      const wrap = document.createElement("div");
+      wrap.className = "flex justify-start";
+      const inner = document.createElement("div");
+      inner.className = "max-w-[80%] rounded-xl px-4 py-2 text-sm markdown bubble-bot text-slate-100";
+
+      const details = document.createElement("details");
+      details.className = "thinking hidden";
+      const summary = document.createElement("summary");
+      summary.textContent = "思考过程 (0)";
+      const body = document.createElement("div");
+      body.className = "thinking-body";
+      details.appendChild(summary);
+      details.appendChild(body);
+
+      const finalEl = document.createElement("div");
+      finalEl.className = "final-answer typing text-slate-400";
+      finalEl.textContent = "思考中…";
+
+      inner.appendChild(details);
+      inner.appendChild(finalEl);
+      wrap.appendChild(inner);
+      chatList.appendChild(wrap);
+      chatList.scrollTop = chatList.scrollHeight;
+
+      return {
+        addStep(text) {
+          details.classList.remove("hidden");
+          const line = document.createElement("div");
+          line.className = "step-line";
+          line.textContent = text;
+          body.appendChild(line);
+          summary.textContent = "思考过程 (" + body.childElementCount + ")";
+          chatList.scrollTop = chatList.scrollHeight;
+        },
+        setFinal(text) {
+          finalEl.classList.remove("typing", "text-slate-400");
+          finalEl.classList.add("text-slate-100");
+          finalEl.textContent = text;
+          chatList.scrollTop = chatList.scrollHeight;
+        },
+        setError(text) {
+          finalEl.classList.remove("typing", "text-slate-400");
+          finalEl.classList.add("text-rose-300");
+          finalEl.textContent = text;
+        },
+        finalize() {
+          finalEl.classList.remove("typing");
+          if (finalEl.textContent === "思考中…") {
+            // 后端未返回 final 事件（例如只调了工具）时，避免一直显示 “思考中…”
+            finalEl.classList.remove("text-slate-400");
+            finalEl.classList.add("text-slate-300");
+            finalEl.textContent = "（已完成，详见上方“思考过程”）";
+          }
+        }
+      };
+    }
+
+    /* ============ chatId 会话上下文 ============ */
+    function genChatId() {
+      try {
+        if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+      } catch {}
+      return "chat-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+    }
+    function getChatId() {
+      let id = localStorage.getItem("sxw.manusChatId");
+      if (!id) {
+        id = genChatId();
+        localStorage.setItem("sxw.manusChatId", id);
+      }
+      return id;
+    }
+    function refreshChatIdTag() {
+      const id = getChatId();
+      const tag = $("#chat-id-tag");
+      if (tag) tag.textContent = "会话：" + id.slice(0, 8);
+    }
+    refreshChatIdTag();
 
     let activeES = null;
     $("#chat-form").addEventListener("submit", e => {
       e.preventDefault();
       const msg = chatInput.value.trim();
       if (!msg) return;
-      appendBubble(msg, "user");
+      appendUserBubble(msg);
       chatInput.value = "";
       chatInput.disabled = true;
       chatBtn.disabled  = true;
 
-      const bot = appendBubble("", "bot");
-      bot.classList.add("typing");
+      const bot = appendBotBubble();
 
       if (activeES) activeES.close();
-      const url = `${API}ai/manus/chat?message=` + encodeURIComponent(msg);
+      const chatId = getChatId();
+      const url = `${API}ai/manus/chat?message=` + encodeURIComponent(msg)
+                + `&chatId=` + encodeURIComponent(chatId);
       const es  = new EventSource(url);
       activeES  = es;
-      es.onmessage = ev => {
-        // 服务器侧 sseEmitter.send(rawString) 直接当 data 输出
-        bot.textContent += ev.data + "\n";
-        chatList.scrollTop = chatList.scrollHeight;
-      };
+      // 后端使用命名事件（step / final / error）
+      es.addEventListener("step",  ev => bot.addStep(ev.data));
+      es.addEventListener("final", ev => bot.setFinal(ev.data));
+      es.addEventListener("error", ev => { if (ev && ev.data) bot.setError(ev.data); });
+      // 兼容其他未命名事件：当作思考过程一部分展示
+      es.onmessage = ev => bot.addStep(ev.data);
       es.onerror = () => {
         es.close();
         activeES = null;
-        bot.classList.remove("typing");
+        bot.finalize();
         chatInput.disabled = false;
         chatBtn.disabled = false;
         chatInput.focus();
@@ -316,6 +473,107 @@
     $("#btn-clear-chat").addEventListener("click", () => {
       if (activeES) { activeES.close(); activeES = null; }
       chatList.innerHTML = "";
+    });
+
+    // “新会话”：清空服务端记忆 + 换一个 chatId + 清屏
+    $("#btn-new-chat").addEventListener("click", async () => {
+      if (activeES) { activeES.close(); activeES = null; }
+      const oldId = localStorage.getItem("sxw.manusChatId");
+      try {
+        if (oldId) {
+          await fetch(`${API}ai/manus/clear?chatId=` + encodeURIComponent(oldId));
+        }
+      } catch {}
+      localStorage.removeItem("sxw.manusChatId");
+      getChatId(); // 重新生成
+      refreshChatIdTag();
+      chatList.innerHTML = "";
+    });
+
+    /* ============ LoveApp chat (SSE token stream) ============ */
+    const loveList  = $("#love-list");
+    const loveInput = $("#love-input");
+    const loveBtn   = $("#love-send");
+
+    function getLoveChatId() {
+      let id = localStorage.getItem("sxw.loveAppChatId");
+      if (!id) {
+        id = genChatId();
+        localStorage.setItem("sxw.loveAppChatId", id);
+      }
+      return id;
+    }
+    function refreshLoveIdTag() {
+      const id = getLoveChatId();
+      const tag = $("#love-id-tag");
+      if (tag) tag.textContent = "会话：" + id.slice(0, 8);
+    }
+    refreshLoveIdTag();
+
+    function appendLoveBubble(text, who) {
+      const wrap = document.createElement("div");
+      wrap.className = "flex " + (who === "user" ? "justify-end" : "justify-start");
+      const inner = document.createElement("div");
+      inner.className = "max-w-[80%] rounded-xl px-4 py-2 text-sm whitespace-pre-wrap markdown "
+        + (who === "user"
+            ? "text-white"
+            : "bubble-bot text-slate-100");
+      if (who === "user") {
+        inner.style.background = "linear-gradient(135deg, #ec4899 0%, #f472b6 100%)";
+      }
+      inner.textContent = text;
+      wrap.appendChild(inner);
+      loveList.appendChild(wrap);
+      loveList.scrollTop = loveList.scrollHeight;
+      return inner;
+    }
+
+    let activeLoveES = null;
+    $("#love-form").addEventListener("submit", e => {
+      e.preventDefault();
+      const msg = loveInput.value.trim();
+      if (!msg) return;
+      appendLoveBubble(msg, "user");
+      loveInput.value = "";
+      loveInput.disabled = true;
+      loveBtn.disabled  = true;
+
+      const bot = appendLoveBubble("", "bot");
+      bot.classList.add("typing");
+
+      if (activeLoveES) activeLoveES.close();
+      const chatId = getLoveChatId();
+      const url = `${API}ai/love_app/chat/sse_emitter?message=` + encodeURIComponent(msg)
+                + `&chatId=` + encodeURIComponent(chatId);
+      const es  = new EventSource(url);
+      activeLoveES = es;
+      // LoveApp 后端逐 token 发送原始字符串 → 追加到同一个气泡里
+      es.onmessage = ev => {
+        bot.textContent += ev.data;
+        loveList.scrollTop = loveList.scrollHeight;
+      };
+      es.onerror = () => {
+        es.close();
+        activeLoveES = null;
+        bot.classList.remove("typing");
+        loveInput.disabled = false;
+        loveBtn.disabled = false;
+        loveInput.focus();
+      };
+    });
+
+    $("#btn-clear-love").addEventListener("click", () => {
+      if (activeLoveES) { activeLoveES.close(); activeLoveES = null; }
+      loveList.innerHTML = "";
+    });
+
+    // “新会话”：LoveApp 的会话记忆由 Spring AI ChatMemory 管理（进程内，重启丢失），这里仅换一个 chatId
+    $("#btn-new-love").addEventListener("click", () => {
+      if (activeLoveES) { activeLoveES.close(); activeLoveES = null; }
+      localStorage.removeItem("sxw.loveAppChatId");
+      getLoveChatId();
+      refreshLoveIdTag();
+      loveList.innerHTML = "";
     });
 
     /* ============ notes ============ */

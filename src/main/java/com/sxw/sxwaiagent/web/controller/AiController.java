@@ -1,11 +1,13 @@
 package com.sxw.sxwaiagent.web.controller;
 
+import com.sxw.sxwaiagent.infrastructure.memory.ManusMemoryStore;
 import com.sxw.sxwaiagent.infrastructure.skill.SkillRegistry;
 import com.sxw.sxwaiagent.manus.SxwManus;
 import com.sxw.sxwaiagent.love.LoveApp;
 import jakarta.annotation.Resource;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.http.MediaType;
@@ -22,6 +24,7 @@ import java.io.IOException;
 @RestController
 @RequestMapping("/ai")
 @Validated
+@Slf4j
 public class AiController {
 
     @Resource
@@ -38,6 +41,9 @@ public class AiController {
 
     @Resource
     private SkillRegistry skillRegistry;
+
+    @Resource
+    private ManusMemoryStore manusMemoryStore;
 
     /**
      * 同步调用 AI 恋爱大师应用
@@ -107,16 +113,36 @@ public class AiController {
     }
 
     /**
-     * 流式调用 Manus 超级智能体
+     * 流式调用 Manus 超级智能体。
+     * <p>接入 {@link ManusMemoryStore} 后，同一 {@code chatId} 跨请求共享对话记忆。</p>
      *
-     * @param message
-     * @return
+     * @param message 用户消息
+     * @param chatId  会话 id，前端需保证同会话多次请求传同一值（缺省为 {@code default}）
      */
     @GetMapping("/manus/chat")
-    public SseEmitter doChatWithManus(@NotBlank @Size(max = 2000) String message) {
+    public SseEmitter doChatWithManus(@NotBlank @Size(max = 2000) String message,
+                                      @Size(max = 64) String chatId) {
+        String safeChatId = (chatId == null || chatId.isBlank()) ? "default" : chatId;
         SxwManus sxwManus = new SxwManus(allTools, dashscopeChatModel, skillRegistry);
         // 使用有界、命名、可观测的线程池，替代默认 ForkJoinPool
         sxwManus.setExecutor(agentTaskExecutor);
+        // 1、加载历史 → messageList
+        java.util.List<org.springframework.ai.chat.messages.Message> history = manusMemoryStore.load(safeChatId);
+        if (!history.isEmpty()) {
+            sxwManus.getMessageList().addAll(history);
+        }
+        log.info("manus memory loaded: chatId={} restored={} msgs", safeChatId, history.size());
+        // 2、结束后回写最新 messageList 到 store
+        sxwManus.setOnFinished(() -> manusMemoryStore.save(safeChatId, sxwManus.getMessageList()));
         return sxwManus.runStream(message);
+    }
+
+    /**
+     * 清空指定 Manus 会话的记忆（测试 / “新会话” 按钮使用）。
+     */
+    @GetMapping("/manus/clear")
+    public String clearManusMemory(@NotBlank @Size(max = 64) String chatId) {
+        manusMemoryStore.clear(chatId);
+        return "ok";
     }
 }

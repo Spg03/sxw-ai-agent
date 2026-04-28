@@ -14,7 +14,7 @@ spring:
       api-key: ${DASHSCOPE_API_KEY:your-api-key}
       chat:
         options:
-          model: ${DASHSCOPE_CHAT_MODEL:qwen3.5-plus-2026-02-15}
+          model: ${DASHSCOPE_CHAT_MODEL:qwen-plus}
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       chat:

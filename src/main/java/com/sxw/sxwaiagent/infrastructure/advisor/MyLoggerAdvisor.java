@@ -33,8 +33,8 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class MyLoggerAdvisor implements CallAdvisor, StreamAdvisor {
 
-    private static final ThreadLocal<String> TRACE = new ThreadLocal<>();
-    private static final ThreadLocal<Long> START_NS = new ThreadLocal<>();
+    /** 单次调用上下文，取代原本的 ThreadLocal（这样在反应式跳线程后依然可用）。 */
+    private record CallContext(String trace, long startNs) {}
 
     /**
      * 进程级默认 MeterRegistry，由 Spring 启动时通过
@@ -68,62 +68,56 @@ public class MyLoggerAdvisor implements CallAdvisor, StreamAdvisor {
         return 0;
     }
 
-    private ChatClientRequest before(ChatClientRequest request) {
-        String trace = UUID.randomUUID().toString().substring(0, 8);
-        TRACE.set(trace);
-        START_NS.set(System.nanoTime());
+    private CallContext before(ChatClientRequest request) {
+        CallContext ctx = new CallContext(UUID.randomUUID().toString().substring(0, 8), System.nanoTime());
         int promptSize = request.prompt() == null || request.prompt().getInstructions() == null
                 ? 0 : request.prompt().getInstructions().size();
-        log.info("ai trace={} phase=request messages={}", trace, promptSize);
+        log.info("ai trace={} phase=request messages={}", ctx.trace(), promptSize);
         if (log.isDebugEnabled()) {
-            log.debug("ai trace={} prompt={}", trace, request.prompt());
+            log.debug("ai trace={} prompt={}", ctx.trace(), request.prompt());
         }
-        return request;
+        return ctx;
     }
 
-    private void observeAfter(ChatClientResponse chatClientResponse) {
-        String trace = TRACE.get();
-        Long start = START_NS.get();
-        long latencyMs = start == null ? -1 : (System.nanoTime() - start) / 1_000_000;
-        try {
-            ChatResponse cr = chatClientResponse.chatResponse();
-            String finishReason = "unknown";
-            long pTok = -1, cTok = -1, tTok = -1;
-            if (cr != null) {
-                if (cr.getResult() != null && cr.getResult().getMetadata() != null
-                        && cr.getResult().getMetadata().getFinishReason() != null) {
-                    finishReason = cr.getResult().getMetadata().getFinishReason();
-                }
-                ChatResponseMetadata meta = cr.getMetadata();
-                if (meta != null && meta.getUsage() != null) {
-                    Usage u = meta.getUsage();
-                    pTok = nz(u.getPromptTokens());
-                    cTok = nz(u.getCompletionTokens());
-                    tTok = nz(u.getTotalTokens());
-                }
+    private void observeAfter(CallContext ctx, ChatClientResponse chatClientResponse) {
+        long latencyMs = Math.max(0, (System.nanoTime() - ctx.startNs()) / 1_000_000);
+        ChatResponse cr = chatClientResponse.chatResponse();
+        String finishReason = "unknown";
+        long pTok = -1, cTok = -1, tTok = -1;
+        if (cr != null) {
+            if (cr.getResult() != null && cr.getResult().getMetadata() != null
+                    && cr.getResult().getMetadata().getFinishReason() != null) {
+                finishReason = cr.getResult().getMetadata().getFinishReason();
             }
-            log.info("ai trace={} phase=response latencyMs={} promptTokens={} completionTokens={} totalTokens={} finishReason={}",
-                    trace, latencyMs, pTok, cTok, tTok, finishReason);
-            if (log.isDebugEnabled() && cr != null && cr.getResult() != null) {
-                log.debug("ai trace={} response={}", trace, cr.getResult().getOutput().getText());
+            ChatResponseMetadata meta = cr.getMetadata();
+            if (meta != null && meta.getUsage() != null) {
+                Usage u = meta.getUsage();
+                pTok = nz(u.getPromptTokens());
+                cTok = nz(u.getCompletionTokens());
+                tTok = nz(u.getTotalTokens());
             }
-            recordMetrics(latencyMs, pTok, cTok, tTok, finishReason, "ok");
-        } finally {
-            TRACE.remove();
-            START_NS.remove();
         }
+        log.info("ai trace={} phase=response latencyMs={} promptTokens={} completionTokens={} totalTokens={} finishReason={}",
+                ctx.trace(), latencyMs, pTok, cTok, tTok, finishReason);
+        if (log.isDebugEnabled() && cr != null && cr.getResult() != null) {
+            log.debug("ai trace={} response={}", ctx.trace(), cr.getResult().getOutput().getText());
+        }
+        recordMetrics(latencyMs, pTok, cTok, tTok, finishReason, "ok");
     }
 
     private void recordMetrics(long latencyMs, long pTok, long cTok, long tTok,
                                String finishReason, String outcome) {
         if (meterRegistry == null) return;
-        Timer.builder("ai.chat.latency")
-                .description("LLM chat call latency")
-                .tag("outcome", outcome)
-                .tag("finishReason", finishReason)
-                .publishPercentileHistogram()
-                .register(meterRegistry)
-                .record(latencyMs, TimeUnit.MILLISECONDS);
+        // 防御性保护：Timer 不接受负值，这里仅在能取得有效耗时时上报
+        if (latencyMs >= 0) {
+            Timer.builder("ai.chat.latency")
+                    .description("LLM chat call latency")
+                    .tag("outcome", outcome)
+                    .tag("finishReason", finishReason)
+                    .publishPercentileHistogram()
+                    .register(meterRegistry)
+                    .record(latencyMs, TimeUnit.MILLISECONDS);
+        }
         if (pTok >= 0) incrCounter("ai.chat.tokens", pTok, "kind", "prompt", "outcome", outcome);
         if (cTok >= 0) incrCounter("ai.chat.tokens", cTok, "kind", "completion", "outcome", outcome);
         if (tTok >= 0) incrCounter("ai.chat.tokens", tTok, "kind", "total", "outcome", outcome);
@@ -143,26 +137,25 @@ public class MyLoggerAdvisor implements CallAdvisor, StreamAdvisor {
 
     @Override
     public ChatClientResponse adviseCall(ChatClientRequest chatClientRequest, CallAdvisorChain chain) {
-        chatClientRequest = before(chatClientRequest);
+        CallContext ctx = before(chatClientRequest);
         try {
             ChatClientResponse chatClientResponse = chain.nextCall(chatClientRequest);
-            observeAfter(chatClientResponse);
+            observeAfter(ctx, chatClientResponse);
             return chatClientResponse;
         } catch (RuntimeException e) {
-            Long start = START_NS.get();
-            long latencyMs = start == null ? -1 : (System.nanoTime() - start) / 1_000_000;
-            log.warn("ai trace={} phase=error latencyMs={} message={}", TRACE.get(), latencyMs, e.getMessage());
+            long latencyMs = Math.max(0, (System.nanoTime() - ctx.startNs()) / 1_000_000);
+            log.warn("ai trace={} phase=error latencyMs={} message={}", ctx.trace(), latencyMs, e.getMessage());
             recordMetrics(latencyMs, -1, -1, -1, "error", "error");
-            TRACE.remove();
-            START_NS.remove();
             throw e;
         }
     }
 
     @Override
     public Flux<ChatClientResponse> adviseStream(ChatClientRequest chatClientRequest, StreamAdvisorChain chain) {
-        chatClientRequest = before(chatClientRequest);
+        CallContext ctx = before(chatClientRequest);
         Flux<ChatClientResponse> chatClientResponseFlux = chain.nextStream(chatClientRequest);
-        return new ChatClientMessageAggregator().aggregateChatClientResponse(chatClientResponseFlux, this::observeAfter);
+        // 起始时间随 ctx 一起传入聚合回调，不依赖 ThreadLocal，跨 boundedElastic 线程依然准确
+        return new ChatClientMessageAggregator()
+                .aggregateChatClientResponse(chatClientResponseFlux, resp -> observeAfter(ctx, resp));
     }
 }
