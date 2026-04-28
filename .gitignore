@@ -1,6 +1,10 @@
 ### CUSTOM ###
 application-local.yml
+application-prod.yml
+.env
 tmp
+logs
+data
 
 HELP.md
 target/

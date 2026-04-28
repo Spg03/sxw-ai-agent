@@ -1,8 +1,8 @@
 spring:
   application:
-    name: yu-ai-agent
+    name: sxw-ai-agent
   profiles:
-    active: local
+    active: ${SPRING_PROFILES_ACTIVE:local}
 # 临时注释掉，便于大家开发调试和部署（实际填写 PgVector 数据库信息）
 #  datasource:
 #    url: xxx
@@ -10,17 +10,26 @@ spring:
 #    password: 123456
   ai:
     dashscope:
-      # 需要替换为你自己的 key
-      api-key: your-api-key
+      # 通过环境变量注入；本地可在 .env 或 shell 中设置 DASHSCOPE_API_KEY
+      api-key: ${DASHSCOPE_API_KEY:your-api-key}
       chat:
         options:
-          model: qwen-plus
+          model: ${DASHSCOPE_CHAT_MODEL:qwen3.5-plus-2026-02-15}
     ollama:
-      base-url: http://localhost:11434
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       chat:
-        model: gemma3:1b
-# 临时注释掉，便于大家开发调试和部署（实际需要启动 MCP 服务）
-#    mcp:
+        model: ${OLLAMA_CHAT_MODEL:gemma3:1b}
+    # MCP 服务端：将本项目中的 Skill 以 MCP 协议（SSE）暴露给外部 Agent / Claude Desktop 等
+    mcp:
+      server:
+        enabled: ${MCP_SERVER_ENABLED:true}
+        name: sxw-ai-agent-mcp
+        version: 1.0.0
+        type: SYNC
+        instructions: "sxw-ai-agent 提供的 MCP 技能集（笔记管理等）"
+        sse-endpoint: /sse
+        sse-message-endpoint: /mcp/message
+# 临时注释掉，便于大家开发调试和部署（实际需要启动 MCP 客户端对接外部服务）
 #      client:
 #        sse:
 #          connections:
@@ -36,7 +45,7 @@ spring:
 #        distance-type: COSINE_DISTANCE
 #        max-document-batch-size: 10000 # Optional: Maximum number of documents per batch
 server:
-  port: 8123
+  port: ${SERVER_PORT:8123}
   servlet:
     context-path: /api
 # springdoc-openapi config
@@ -50,7 +59,7 @@ springdoc:
   group-configs:
     - group: 'default'
       paths-to-match: '/**'
-      packages-to-scan: com.yupi.yuaiagent.controller
+      packages-to-scan: com.sxw.sxwaiagent.web.controller
 # knife4j config
 knife4j:
   enable: true
@@ -58,9 +67,83 @@ knife4j:
     language: zh_cn
 # searchAPI
 search-api:
-  # 需要替换为你自己的 key
-  api-key: 你的 API Key
+  api-key: ${SEARCH_API_KEY:your-search-api-key}
+# 业务自定义：技能 / 工具安全沙箱 / 缓存配置
+sxw:
+  skill:
+    note:
+      base-dir: ${NOTE_BASE_DIR:${user.dir}/tmp/notes}
+      max-file-size-bytes: 1048576
+  cache:
+    llm:
+      # LLM 应答缓存（Caffeine LRU + TTL），命中相同提问秒级返回 + 降本
+      enabled: ${LLM_CACHE_ENABLED:true}
+      max-size: ${LLM_CACHE_MAX_SIZE:1000}
+      ttl-minutes: ${LLM_CACHE_TTL_MINUTES:30}
+  tool:
+    terminal:
+      # 终端工具默认关闭，避免被 Agent 误用造成 RCE；需要时显式打开并限制白名单
+      enabled: ${TERMINAL_TOOL_ENABLED:false}
+      timeout-seconds: 10
+      max-output-chars: 8192
+      allowed-commands:
+        - echo
+        - dir
+        - ls
+        - pwd
+        - whoami
+        - hostname
+        - date
+# Resilience4j：DashScope 调用的高可用三件套
+resilience4j:
+  retry:
+    instances:
+      dashscope:
+        max-attempts: 3
+        wait-duration: 1s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        # 熔断器拒绝时不应再重试，直接快速失败
+        ignore-exceptions:
+          - io.github.resilience4j.circuitbreaker.CallNotPermittedException
+          - io.github.resilience4j.ratelimiter.RequestNotPermitted
+  ratelimiter:
+    instances:
+      dashscope:
+        limit-for-period: 30
+        limit-refresh-period: 1s
+        timeout-duration: 0   # 0 = 限速触发立即失败而非阻塞
+  circuitbreaker:
+    instances:
+      dashscope:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        register-health-indicator: true
 # 修改日志级别，查看 Spring AI 更多调用细节
 logging:
   level:
     org.springframework.ai: DEBUG
+    org.springframework.ai.retry.autoconfigure.SpringAiRetryAutoConfiguration: 'OFF'
+    com.alibaba.cloud.ai.dashscope.embedding.DashScopeEmbeddingModel: 'OFF'
+# Actuator 端点（健康检查 + Prometheus 指标）
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  prometheus:
+    metrics:
+      export:
+        enabled: true

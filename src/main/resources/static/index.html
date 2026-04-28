@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>sxw-ai-agent · 控制台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Microsoft YaHei", Roboto, sans-serif;
+      background: radial-gradient(circle at 20% 0%, #1e293b 0%, #020617 60%);
+      color: #e2e8f0;
+    }
+    .glass {
+      background: rgba(15, 23, 42, 0.65);
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      backdrop-filter: blur(8px);
+    }
+    .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+    .scroll-thin::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.35); border-radius: 3px;
+    }
+    .bubble-user {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    }
+    .bubble-bot {
+      background: rgba(30, 41, 59, 0.85);
+      border: 1px solid rgba(148, 163, 184, 0.15);
+    }
+    .typing::after {
+      content: "▍"; margin-left: 2px;
+      animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+    .pulse-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+      animation: pulse 1.6s infinite;
+    }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+      70%  { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+    }
+    .tab-active {
+      background: rgba(99, 102, 241, 0.2);
+      color: #c7d2fe;
+      border: 1px solid rgba(99, 102, 241, 0.4);
+    }
+    .markdown p { margin: 0.4em 0; }
+    .markdown code {
+      background: rgba(15, 23, 42, 0.7);
+      padding: 0 4px; border-radius: 3px; font-size: 0.9em;
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <!-- Header -->
+  <header class="border-b border-slate-800 sticky top-0 z-10 glass">
+    <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold">
+          AI
+        </div>
+        <div>
+          <div class="font-semibold tracking-wide">sxw-ai-agent</div>
+          <div class="text-xs text-slate-400">Spring AI · MCP · Manus · RAG</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 text-xs text-slate-400">
+        <span class="pulse-dot bg-green-400" id="health-dot"></span>
+        <span id="health-text">检查中…</span>
+      </div>
+    </div>
+    <nav class="max-w-7xl mx-auto px-6 pb-3 flex gap-2">
+      <button data-tab="chat"    class="tab-btn tab-active px-4 py-1.5 rounded-md text-sm">智能体对话</button>
+      <button data-tab="notes"   class="tab-btn px-4 py-1.5 rounded-md text-sm text-slate-300 hover:bg-slate-800">笔记</button>
+      <button data-tab="skills"  class="tab-btn px-4 py-1.5 rounded-md text-sm text-slate-300 hover:bg-slate-800">Skills</button>
+      <button data-tab="metrics" class="tab-btn px-4 py-1.5 rounded-md text-sm text-slate-300 hover:bg-slate-800">监控面板</button>
+    </nav>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 py-6">
+    <!-- ========= Chat ========= -->
+    <section id="tab-chat" class="tab-pane">
+      <div class="glass rounded-xl flex flex-col h-[calc(100vh-200px)]">
+        <div class="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-sm text-slate-300">Manus 智能体</span>
+            <span class="text-[11px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300">SSE 流式</span>
+          </div>
+          <button id="btn-clear-chat" class="text-xs text-slate-400 hover:text-slate-200">清空</button>
+        </div>
+        <div id="chat-list" class="flex-1 overflow-y-auto scroll-thin px-5 py-4 space-y-4">
+          <div class="text-center text-slate-500 text-sm pt-12">
+            👋 试试：<code class="px-2 py-0.5 rounded bg-slate-800 text-indigo-300">帮我用笔记技能记一条标题为 demo 的内容</code>
+          </div>
+        </div>
+        <div class="px-4 py-3 border-t border-slate-800">
+          <form id="chat-form" class="flex gap-2">
+            <input id="chat-input" type="text" maxlength="2000"
+                   placeholder="输入消息后回车…"
+                   class="flex-1 bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+            <button id="chat-send" type="submit"
+                    class="px-4 py-2 rounded-md bg-indigo-500 hover:bg-indigo-400 text-sm font-medium">
+              发送
+            </button>
+          </form>
+          <div class="text-[11px] text-slate-500 mt-1">
+            后端：<code>/api/ai/manus/chat</code> · 工具：笔记 / 终端(沙箱) / 高德地图等 MCP 技能
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========= Notes ========= -->
+    <section id="tab-notes" class="tab-pane hidden">
+      <div class="grid grid-cols-12 gap-4">
+        <!-- Left: list + search -->
+        <div class="col-span-4 glass rounded-xl flex flex-col h-[calc(100vh-200px)]">
+          <div class="px-4 py-3 border-b border-slate-800 space-y-2">
+            <div class="flex items-center gap-2">
+              <input id="note-search" placeholder="搜索关键词…"
+                     class="flex-1 bg-slate-900/60 border border-slate-700 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-indigo-500"/>
+              <button id="btn-search" class="px-3 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-600">搜</button>
+            </div>
+            <button id="btn-new-note" class="w-full py-1.5 text-sm rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-500/40">
+              + 新建笔记
+            </button>
+          </div>
+          <div id="note-list" class="flex-1 overflow-y-auto scroll-thin p-2 text-sm space-y-1"></div>
+        </div>
+        <!-- Right: editor -->
+        <div class="col-span-8 glass rounded-xl flex flex-col h-[calc(100vh-200px)]">
+          <div class="px-4 py-3 border-b border-slate-800 flex items-center gap-2">
+            <input id="note-title" placeholder="标题（仅字母数字 _ - .）"
+                   class="flex-1 bg-slate-900/60 border border-slate-700 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-indigo-500" />
+            <button id="btn-save-note"   class="px-3 py-1.5 text-sm rounded bg-emerald-500/80 hover:bg-emerald-400">保存</button>
+            <button id="btn-delete-note" class="px-3 py-1.5 text-sm rounded bg-rose-500/70 hover:bg-rose-500">删除</button>
+          </div>
+          <textarea id="note-body" placeholder="在此输入 Markdown 内容…"
+                    class="flex-1 bg-transparent p-4 text-sm font-mono resize-none focus:outline-none scroll-thin"></textarea>
+          <div id="note-status" class="px-4 py-2 text-xs text-slate-500 border-t border-slate-800 min-h-[2rem]"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========= Skills ========= -->
+    <section id="tab-skills" class="tab-pane hidden">
+      <div class="grid grid-cols-12 gap-4">
+        <div class="col-span-4 glass rounded-xl p-4 h-[calc(100vh-200px)] overflow-y-auto scroll-thin">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm text-slate-300">Agent Skills</span>
+            <button id="btn-skills-reload" class="text-xs text-slate-400 hover:text-slate-200">刷新</button>
+          </div>
+          <div class="text-[11px] text-slate-500 mb-3">
+            按 Anthropic Agent Skills 规范加载 <code>classpath:skills/*/SKILL.md</code>，
+            启动期仅注入摘要进 system prompt，命中后通过 <code>loadSkill</code> 工具按需加载正文。
+          </div>
+          <ul id="skill-list" class="space-y-2"></ul>
+        </div>
+        <div class="col-span-8 glass rounded-xl p-4 h-[calc(100vh-200px)] overflow-y-auto scroll-thin">
+          <div id="skill-detail-empty" class="text-slate-500 text-sm">← 选择左侧 skill 查看完整 SKILL.md</div>
+          <pre id="skill-detail" class="hidden whitespace-pre-wrap text-sm text-slate-200 font-mono leading-relaxed"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========= Metrics ========= -->
+    <section id="tab-metrics" class="tab-pane hidden">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="glass rounded-xl p-5">
+          <div class="text-xs text-slate-400 mb-2">LLM 缓存命中率</div>
+          <div id="m-cache-rate" class="text-3xl font-bold text-emerald-400">—</div>
+          <div id="m-cache-detail" class="text-xs text-slate-500 mt-2">命中 0 · 未命中 0</div>
+        </div>
+        <div class="glass rounded-xl p-5">
+          <div class="text-xs text-slate-400 mb-2">Token 累计</div>
+          <div id="m-tokens" class="text-3xl font-bold text-indigo-300">—</div>
+          <div id="m-tokens-detail" class="text-xs text-slate-500 mt-2">prompt — / completion —</div>
+        </div>
+        <div class="glass rounded-xl p-5">
+          <div class="text-xs text-slate-400 mb-2">熔断器状态 (dashscope)</div>
+          <div id="m-cb-state" class="text-3xl font-bold">—</div>
+          <div id="m-cb-detail" class="text-xs text-slate-500 mt-2">—</div>
+        </div>
+        <div class="glass rounded-xl p-5">
+          <div class="text-xs text-slate-400 mb-2">Agent 线程池</div>
+          <div id="m-pool" class="text-3xl font-bold text-amber-300">—</div>
+          <div id="m-pool-detail" class="text-xs text-slate-500 mt-2">活跃 — / 队列 —</div>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+        <div class="glass rounded-xl p-5">
+          <div class="text-xs text-slate-400 mb-3">LLM 调用次数</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <div class="text-2xl font-semibold text-emerald-300" id="m-calls-ok">—</div>
+              <div class="text-xs text-slate-500">成功</div>
+            </div>
+            <div>
+              <div class="text-2xl font-semibold text-rose-400" id="m-calls-err">—</div>
+              <div class="text-xs text-slate-500">失败</div>
+            </div>
+          </div>
+        </div>
+        <div class="glass rounded-xl p-5">
+          <div class="text-xs text-slate-400 mb-3">JVM</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <div class="text-2xl font-semibold text-sky-300" id="m-jvm-mem">—</div>
+              <div class="text-xs text-slate-500">堆已用 / MB</div>
+            </div>
+            <div>
+              <div class="text-2xl font-semibold text-fuchsia-300" id="m-jvm-threads">—</div>
+              <div class="text-xs text-slate-500">线程数</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="text-[11px] text-slate-500 mt-3">
+        指标来源：<code>/api/actuator/prometheus</code> · 每 5s 刷新
+      </div>
+    </section>
+  </main>
+
+  <script>
+    /* ============ helpers ============ */
+    const $  = (s, r=document) => r.querySelector(s);
+    const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+    // index.html 自身位于 /api/ 下，相对路径会自动带上 context-path
+    const API = "";
+    function fmt(n) { return new Intl.NumberFormat().format(n); }
+
+    /* ============ tabs ============ */
+    $$(".tab-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        $$(".tab-btn").forEach(b => b.classList.remove("tab-active"));
+        btn.classList.add("tab-active");
+        $$(".tab-pane").forEach(p => p.classList.add("hidden"));
+        $("#tab-" + btn.dataset.tab).classList.remove("hidden");
+        if (btn.dataset.tab === "notes")   refreshNoteList();
+        if (btn.dataset.tab === "skills")  refreshSkillList();
+        if (btn.dataset.tab === "metrics") refreshMetrics();
+      });
+    });
+
+    /* ============ health ============ */
+    async function pingHealth() {
+      try {
+        const r = await fetch(`${API}health`);
+        const t = await r.text();
+        $("#health-text").textContent = r.ok ? "在线 · " + t : "异常";
+        $("#health-dot").className = "pulse-dot " + (r.ok ? "bg-green-400" : "bg-rose-500");
+      } catch {
+        $("#health-text").textContent = "离线";
+        $("#health-dot").className = "pulse-dot bg-rose-500";
+      }
+    }
+    pingHealth();
+    setInterval(pingHealth, 15000);
+
+    /* ============ chat (SSE) ============ */
+    const chatList  = $("#chat-list");
+    const chatInput = $("#chat-input");
+    const chatBtn   = $("#chat-send");
+
+    function appendBubble(text, who) {
+      const wrap = document.createElement("div");
+      wrap.className = "flex " + (who === "user" ? "justify-end" : "justify-start");
+      const inner = document.createElement("div");
+      inner.className = "max-w-[80%] rounded-xl px-4 py-2 text-sm whitespace-pre-wrap markdown "
+        + (who === "user" ? "bubble-user text-white" : "bubble-bot text-slate-100");
+      inner.textContent = text;
+      wrap.appendChild(inner);
+      chatList.appendChild(wrap);
+      chatList.scrollTop = chatList.scrollHeight;
+      return inner;
+    }
+
+    let activeES = null;
+    $("#chat-form").addEventListener("submit", e => {
+      e.preventDefault();
+      const msg = chatInput.value.trim();
+      if (!msg) return;
+      appendBubble(msg, "user");
+      chatInput.value = "";
+      chatInput.disabled = true;
+      chatBtn.disabled  = true;
+
+      const bot = appendBubble("", "bot");
+      bot.classList.add("typing");
+
+      if (activeES) activeES.close();
+      const url = `${API}ai/manus/chat?message=` + encodeURIComponent(msg);
+      const es  = new EventSource(url);
+      activeES  = es;
+      es.onmessage = ev => {
+        // 服务器侧 sseEmitter.send(rawString) 直接当 data 输出
+        bot.textContent += ev.data + "\n";
+        chatList.scrollTop = chatList.scrollHeight;
+      };
+      es.onerror = () => {
+        es.close();
+        activeES = null;
+        bot.classList.remove("typing");
+        chatInput.disabled = false;
+        chatBtn.disabled = false;
+        chatInput.focus();
+      };
+    });
+
+    $("#btn-clear-chat").addEventListener("click", () => {
+      if (activeES) { activeES.close(); activeES = null; }
+      chatList.innerHTML = "";
+    });
+
+    /* ============ notes ============ */
+    const noteList  = $("#note-list");
+    const noteTitle = $("#note-title");
+    const noteBody  = $("#note-body");
+    const noteStatus= $("#note-status");
+
+    function setStatus(msg, kind = "info") {
+      const colors = { info: "text-slate-400", ok: "text-emerald-400", err: "text-rose-400" };
+      noteStatus.className = "px-4 py-2 text-xs border-t border-slate-800 min-h-[2rem] " + colors[kind];
+      noteStatus.textContent = msg;
+    }
+
+    async function refreshNoteList(keyword) {
+      try {
+        const url = keyword
+          ? `${API}notes/search?keyword=` + encodeURIComponent(keyword)
+          : `${API}notes/list`;
+        const r = await fetch(url);
+        const j = await r.json();
+        const data = j.data || "";
+        noteList.innerHTML = "";
+        const lines = data.split("\n").map(s => s.trim()).filter(Boolean);
+        // 第一行是 ok / ok: ... / failed
+        const items = lines.slice(1);
+        if (items.length === 0) {
+          noteList.innerHTML = '<div class="text-slate-500 text-xs px-2 py-2">暂无笔记</div>';
+          return;
+        }
+        items.forEach(line => {
+          const title = line.replace(/^- /, "").split("  ::  ")[0].trim();
+          const snippet = line.includes("::") ? line.split("  ::  ")[1] : "";
+          const div = document.createElement("button");
+          div.className = "w-full text-left px-3 py-2 rounded hover:bg-slate-800/70 group";
+          div.innerHTML = `
+            <div class="text-slate-200 truncate">${title}</div>
+            ${snippet ? `<div class="text-[11px] text-slate-500 truncate">${snippet}</div>` : ""}`;
+          div.onclick = () => loadNote(title);
+          noteList.appendChild(div);
+        });
+      } catch (e) {
+        setStatus("加载列表失败：" + e.message, "err");
+      }
+    }
+
+    async function loadNote(title) {
+      noteTitle.value = title;
+      try {
+        const r = await fetch(`${API}notes?title=` + encodeURIComponent(title));
+        const j = await r.json();
+        const text = (j.data || "").replace(/^ok:\n?/, "");
+        noteBody.value = text;
+        setStatus("已载入：" + title, "info");
+      } catch (e) {
+        setStatus("加载失败：" + e.message, "err");
+      }
+    }
+
+    $("#btn-new-note").addEventListener("click", () => {
+      noteTitle.value = ""; noteBody.value = ""; setStatus("新建中…", "info");
+    });
+
+    $("#btn-search").addEventListener("click", () => {
+      const k = $("#note-search").value.trim();
+      refreshNoteList(k || undefined);
+    });
+    $("#note-search").addEventListener("keydown", e => {
+      if (e.key === "Enter") $("#btn-search").click();
+    });
+
+    $("#btn-save-note").addEventListener("click", async () => {
+      const title = noteTitle.value.trim();
+      const content = noteBody.value;
+      if (!title) { setStatus("标题不能为空", "err"); return; }
+      try {
+        const r = await fetch(`${API}notes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, content }),
+        });
+        const j = await r.json();
+        if (r.ok) { setStatus("已保存：" + j.data, "ok"); refreshNoteList(); }
+        else      { setStatus("保存失败：" + (j.message || r.status), "err"); }
+      } catch (e) { setStatus("保存失败：" + e.message, "err"); }
+    });
+
+    $("#btn-delete-note").addEventListener("click", async () => {
+      const title = noteTitle.value.trim();
+      if (!title) return;
+      if (!confirm(`确认删除 ${title}？`)) return;
+      try {
+        const r = await fetch(`${API}notes?title=` + encodeURIComponent(title), { method: "DELETE" });
+        const j = await r.json();
+        setStatus("已删除：" + j.data, r.ok ? "ok" : "err");
+        noteTitle.value = ""; noteBody.value = "";
+        refreshNoteList();
+      } catch (e) { setStatus("删除失败：" + e.message, "err"); }
+    });
+
+    /* ============ metrics ============ */
+    function parseProm(text, name, labelFilter = {}) {
+      // 匹配形如：ai_chat_cache_total{outcome="hit",...} 12.0
+      const re = new RegExp(`^${name}(?:\\{([^}]*)\\})?\\s+([\\d.eE+-]+)`, "gm");
+      let m, out = [];
+      while ((m = re.exec(text)) !== null) {
+        const labels = {};
+        if (m[1]) {
+          m[1].split(",").forEach(p => {
+            const idx = p.indexOf("=");
+            if (idx > 0) {
+              const k = p.slice(0, idx).trim();
+              const v = p.slice(idx + 1).trim().replace(/^"|"$/g, "");
+              labels[k] = v;
+            }
+          });
+        }
+        const ok = Object.entries(labelFilter).every(([k, v]) => labels[k] === v);
+        if (ok) out.push({ labels, value: parseFloat(m[2]) });
+      }
+      return out;
+    }
+    const sum = arr => arr.reduce((s, x) => s + (Number.isFinite(x.value) ? x.value : 0), 0);
+
+    /* ============ skills ============ */
+    const skillList   = $("#skill-list");
+    const skillDetail = $("#skill-detail");
+    const skillEmpty  = $("#skill-detail-empty");
+
+    async function refreshSkillList() {
+      skillList.innerHTML = '<li class="text-xs text-slate-500">加载中…</li>';
+      try {
+        const r = await fetch(`${API}skills`);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const arr = await r.json();
+        if (!arr.length) {
+          skillList.innerHTML = '<li class="text-xs text-slate-500">未发现任何 skill</li>';
+          return;
+        }
+        skillList.innerHTML = "";
+        for (const s of arr) {
+          const li = document.createElement("li");
+          li.className = "p-3 rounded-md bg-slate-900/60 hover:bg-slate-800 cursor-pointer border border-slate-800";
+          li.innerHTML = `<div class="text-sm text-indigo-300 font-medium">${s.name}</div>
+                          <div class="text-xs text-slate-400 mt-1">${s.description}</div>`;
+          li.addEventListener("click", () => loadSkillDetail(s.name));
+          skillList.appendChild(li);
+        }
+      } catch (e) {
+        skillList.innerHTML = `<li class="text-xs text-rose-400">加载失败：${e.message}</li>`;
+      }
+    }
+
+    async function loadSkillDetail(name) {
+      skillEmpty.classList.add("hidden");
+      skillDetail.classList.remove("hidden");
+      skillDetail.textContent = "加载中…";
+      try {
+        const r = await fetch(`${API}skills/${encodeURIComponent(name)}`);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const s = await r.json();
+        skillDetail.textContent =
+          `# ${s.name}\n# ${s.description}\n\n` + s.body;
+      } catch (e) {
+        skillDetail.textContent = "加载失败：" + e.message;
+      }
+    }
+
+    $("#btn-skills-reload").addEventListener("click", refreshSkillList);
+
+    /* ============ metrics ============ */
+    async function refreshMetrics() {
+      try {
+        const r = await fetch(`${API}actuator/prometheus`);
+        if (!r.ok) throw new Error("prometheus endpoint " + r.status);
+        const t = await r.text();
+
+        // 缓存命中
+        const hit  = sum(parseProm(t, "ai_chat_cache_total", { outcome: "hit" }));
+        const ms   = sum(parseProm(t, "ai_chat_cache_total", { outcome: "miss-stored" }));
+        const sk   = sum(parseProm(t, "ai_chat_cache_total", { outcome: "miss-skipped" }));
+        const total = hit + ms + sk;
+        $("#m-cache-rate").textContent  = total ? (hit / total * 100).toFixed(1) + "%" : "—";
+        $("#m-cache-detail").textContent = `命中 ${fmt(hit)} · 未命中 ${fmt(ms)} · 跳过 ${fmt(sk)}`;
+
+        // tokens
+        const pTok = sum(parseProm(t, "ai_chat_tokens_total", { kind: "prompt" }));
+        const cTok = sum(parseProm(t, "ai_chat_tokens_total", { kind: "completion" }));
+        const tTok = sum(parseProm(t, "ai_chat_tokens_total", { kind: "total" }));
+        $("#m-tokens").textContent       = fmt(tTok);
+        $("#m-tokens-detail").textContent = `prompt ${fmt(pTok)} · completion ${fmt(cTok)}`;
+
+        // calls
+        $("#m-calls-ok").textContent  = fmt(sum(parseProm(t, "ai_chat_calls_total", { outcome: "ok" })));
+        $("#m-calls-err").textContent = fmt(sum(parseProm(t, "ai_chat_calls_total", { outcome: "error" })));
+
+        // CB state: 找 value==1 的那个 state
+        const cbs = parseProm(t, "resilience4j_circuitbreaker_state", { name: "dashscope" })
+                    .filter(x => x.value === 1);
+        const state = cbs[0]?.labels?.state || "unknown";
+        const colorMap = { closed: "text-emerald-400", open: "text-rose-400", half_open: "text-amber-300" };
+        const el = $("#m-cb-state");
+        el.textContent = state.toUpperCase();
+        el.className = "text-3xl font-bold " + (colorMap[state] || "text-slate-300");
+        const fail = sum(parseProm(t, "resilience4j_circuitbreaker_failure_rate", { name: "dashscope" }));
+        $("#m-cb-detail").textContent = "失败率 " + (Number.isFinite(fail) ? fail.toFixed(1) : "—") + "%";
+
+        // executor
+        const active = sum(parseProm(t, "executor_active_threads", { name: "agentTaskExecutor" }));
+        const queued = sum(parseProm(t, "executor_queued_tasks",   { name: "agentTaskExecutor" }));
+        $("#m-pool").textContent       = fmt(active);
+        $("#m-pool-detail").textContent = `活跃 ${fmt(active)} · 队列 ${fmt(queued)}`;
+
+        // jvm
+        const heap = sum(parseProm(t, "jvm_memory_used_bytes", { area: "heap" }));
+        $("#m-jvm-mem").textContent = (heap / 1024 / 1024).toFixed(0);
+        $("#m-jvm-threads").textContent = fmt(sum(parseProm(t, "jvm_threads_live_threads")));
+      } catch (e) {
+        console.warn("metrics", e);
+      }
+    }
+    setInterval(() => {
+      if (!$("#tab-metrics").classList.contains("hidden")) refreshMetrics();
+    }, 5000);
+  </script>
+</body>
+</html>

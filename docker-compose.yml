@@ -1,0 +1,41 @@
+services:
+  sxw-ai-agent:
+    build: .
+    image: sxw-ai-agent:latest
+    container_name: sxw-ai-agent
+    ports:
+      - "8123:8123"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DASHSCOPE_CHAT_MODEL: ${DASHSCOPE_CHAT_MODEL:-qwen-plus}
+      SEARCH_API_KEY: ${SEARCH_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
+      MCP_SERVER_ENABLED: "true"
+      NOTE_BASE_DIR: /data/notes
+    volumes:
+      - note-data:/data/notes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # 可选：启用 PgVector 时取消注释，并把 application.yml 的 datasource/vectorstore 打开
+  # pgvector:
+  #   image: pgvector/pgvector:pg16
+  #   container_name: sxw-pgvector
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgres
+  #     POSTGRES_DB: sxw_ai
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - pgvector-data:/var/lib/postgresql/data
+
+volumes:
+  note-data:
+  # pgvector-data:

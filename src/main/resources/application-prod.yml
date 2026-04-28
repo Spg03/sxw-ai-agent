@@ -1,2 +1,168 @@
-# 可以编写生产环境的配置，会覆盖 application.yml 配置
-# 注意提交时不要包含敏感信息（或者不要提交该文件）
+# =====================================================================
+# 生产 / 演示环境配置（profile = prod）
+# 启动方式（任选其一）：
+#   1) IDEA 运行配置：Active profiles = prod
+#   2) 命令行：  mvn spring-boot:run -Dspring-boot.run.profiles=prod
+#   3) jar 包： java -jar app.jar --spring.profiles.active=prod
+#   4) 环境变量：SPRING_PROFILES_ACTIVE=prod
+#
+# !!! 安全警告 !!!
+# 本文件内嵌了一个临时 DashScope API Key，仅用于本机演示。
+# - 演示完成后请立即到阿里云百炼控制台禁用该 Key 并重新签发。
+# - 切勿把本文件 push 到公共仓库；建议把 application-prod.yml 加入 .gitignore。
+# - 长期方案：仍以环境变量 ${DASHSCOPE_API_KEY} 注入，删除下方硬编码值。
+# =====================================================================
+
+spring:
+  ai:
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY:your-api-key}
+      chat:
+        options:
+          model: ${DASHSCOPE_CHAT_MODEL:qwen-flash}
+          temperature: 0.7
+    # 生产环境默认开启 MCP 服务端，对外暴露技能集
+    mcp:
+      server:
+        enabled: ${MCP_SERVER_ENABLED:true}
+        name: sxw-ai-agent-mcp
+        version: 1.0.0
+        type: SYNC
+        sse-endpoint: /sse
+        sse-message-endpoint: /mcp/message
+
+server:
+  port: ${SERVER_PORT:8123}
+  servlet:
+    context-path: /api
+  # 生产环境优雅停机，留 30s 处理在飞请求
+  shutdown: graceful
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 20
+    accept-count: 100
+    connection-timeout: 20s
+
+# searchapi.io：可选，没有也不影响主链路
+search-api:
+  api-key: ${SEARCH_API_KEY:}
+
+# 业务配置：覆盖 application.yml 的默认值
+sxw:
+  skill:
+    note:
+      base-dir: ${NOTE_BASE_DIR:${user.dir}/data/notes}
+      max-file-size-bytes: 2097152          # 2 MB
+  cache:
+    llm:
+      enabled: ${LLM_CACHE_ENABLED:true}
+      max-size: ${LLM_CACHE_MAX_SIZE:5000}
+      ttl-minutes: ${LLM_CACHE_TTL_MINUTES:60}
+  tool:
+    terminal:
+      # 生产环境强烈建议保持 false，避免被 Agent 误用造成 RCE
+      enabled: ${TERMINAL_TOOL_ENABLED:false}
+      timeout-seconds: 10
+      max-output-chars: 8192
+      allowed-commands:
+        - echo
+        - dir
+        - ls
+        - pwd
+        - whoami
+        - hostname
+        - date
+  rag:
+    keyword-enrich:
+      # 启动期是否调用 LLM 给文档抽关键词；首次冷启动慢可关掉
+      enabled: ${RAG_KEYWORD_ENRICH_ENABLED:false}
+
+# Resilience4j：生产期更严格的限流 / 熔断阈值
+resilience4j:
+  retry:
+    instances:
+      dashscope:
+        max-attempts: 3
+        wait-duration: 800ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        ignore-exceptions:
+          - io.github.resilience4j.circuitbreaker.CallNotPermittedException
+          - io.github.resilience4j.ratelimiter.RequestNotPermitted
+  ratelimiter:
+    instances:
+      dashscope:
+        limit-for-period: 60
+        limit-refresh-period: 1s
+        timeout-duration: 0
+  circuitbreaker:
+    instances:
+      dashscope:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 50
+        minimum-number-of-calls: 20
+        failure-rate-threshold: 50
+        slow-call-rate-threshold: 70
+        slow-call-duration-threshold: 10s
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 5
+        automatic-transition-from-open-to-half-open-enabled: true
+        register-health-indicator: true
+
+# 生产日志：收敛 Spring AI 的 DEBUG 噪声
+logging:
+  level:
+    root: INFO
+    org.springframework.ai: INFO
+    com.sxw.sxwaiagent: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: ${LOG_FILE:logs/sxw-ai-agent.log}
+  logback:
+    rollingpolicy:
+      max-file-size: 50MB
+      max-history: 14
+      total-size-cap: 1GB
+
+# Actuator：生产环境收紧暴露面，仅保留运维必需端点
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true       # 暴露 /actuator/health/liveness 与 /readiness，便于 K8s 探针
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+    circuitbreakers:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      env: prod
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  info:
+    env:
+      enabled: true
+    java:
+      enabled: true
+    os:
+      enabled: true
+
+info:
+  app:
+    name: ${spring.application.name}
+    description: SXW AI Agent - 企业级 AI Agent 演示（MCP / RAG / 缓存 / 熔断）
+    profile: prod
