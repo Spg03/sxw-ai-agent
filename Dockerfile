@@ -17,6 +17,7 @@ WORKDIR /app
 
 # 非 root 用户
 RUN useradd -r -u 1001 -g root appuser
+RUN mkdir -p /app/tmp && chown -R 1001:1001 /app/tmp
 USER 1001
 
 COPY --from=build /workspace/target/sxw-ai-agent-*.jar /app/app.jar
