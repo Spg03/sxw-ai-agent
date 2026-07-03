@@ -38,8 +38,8 @@ jobs:
           SEARCH_API_KEY: ${{ secrets.SEARCH_API_KEY }}
         run: |
           if [ -z "$DASHSCOPE_API_KEY" ]; then
-            echo "::error::DASHSCOPE_API_KEY secret is not set; cannot run eval."
-            exit 1
+            echo "::warning::DASHSCOPE_API_KEY secret is not set; skipping eval."
+            exit 0
           fi
           mvn -B -ntp test -Dgroups=eval -Dtest=LoveAppEvalSuiteTest
 

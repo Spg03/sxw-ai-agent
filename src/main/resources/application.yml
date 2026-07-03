@@ -7,11 +7,11 @@ spring:
 #  datasource:
 #    url: xxx
 #    username: root
-#    password: 123456
+#    password: ${PGVECTOR_PASSWORD:}
   ai:
     dashscope:
       # 通过环境变量注入；本地可在 .env 或 shell 中设置 DASHSCOPE_API_KEY
-      api-key: ${DASHSCOPE_API_KEY:your-api-key}
+      api-key: ${DASHSCOPE_API_KEY:}
       chat:
         options:
           model: ${DASHSCOPE_CHAT_MODEL:qwen-plus}
@@ -67,9 +67,17 @@ knife4j:
     language: zh_cn
 # searchAPI
 search-api:
-  api-key: ${SEARCH_API_KEY:your-search-api-key}
+  api-key: ${SEARCH_API_KEY:}
 # 业务自定义：技能 / 工具安全沙箱 / 缓存配置
 sxw:
+  security:
+    api-key:
+      enabled: ${SXW_SECURITY_API_KEY_ENABLED:false}
+      value: ${SXW_SECURITY_API_KEY:}
+  agent:
+    trace:
+      max-runs: ${SXW_AGENT_TRACE_MAX_RUNS:100}
+      max-events-per-run: ${SXW_AGENT_TRACE_MAX_EVENTS_PER_RUN:200}
   skill:
     note:
       base-dir: ${NOTE_BASE_DIR:${user.dir}/tmp/notes}
@@ -80,6 +88,20 @@ sxw:
       enabled: ${LLM_CACHE_ENABLED:true}
       max-size: ${LLM_CACHE_MAX_SIZE:1000}
       ttl-minutes: ${LLM_CACHE_TTL_MINUTES:30}
+  ragflow:
+    # RAGFlow 默认关闭；配置 API Key 和 dataset ids 后启用远程知识库检索
+    enabled: ${RAGFLOW_ENABLED:false}
+    base-url: ${RAGFLOW_BASE_URL:http://localhost:9380}
+    api-key: ${RAGFLOW_API_KEY:}
+    dataset-ids: ${RAGFLOW_DATASET_IDS:}
+    page: ${RAGFLOW_PAGE:1}
+    page-size: ${RAGFLOW_PAGE_SIZE:5}
+    similarity-threshold: ${RAGFLOW_SIMILARITY_THRESHOLD:0.2}
+    vector-similarity-weight: ${RAGFLOW_VECTOR_SIMILARITY_WEIGHT:0.3}
+    top-k: ${RAGFLOW_TOP_K:1024}
+    keyword: ${RAGFLOW_KEYWORD:false}
+    timeout-seconds: ${RAGFLOW_TIMEOUT_SECONDS:10}
+    max-context-chars: ${RAGFLOW_MAX_CONTEXT_CHARS:12000}
   tool:
     terminal:
       # 终端工具默认关闭，避免被 Agent 误用造成 RCE；需要时显式打开并限制白名单

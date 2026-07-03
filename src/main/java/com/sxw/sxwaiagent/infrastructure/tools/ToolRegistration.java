@@ -2,6 +2,7 @@ package com.sxw.sxwaiagent.infrastructure.tools;
 
 import com.sxw.sxwaiagent.infrastructure.skill.NoteSkill;
 import com.sxw.sxwaiagent.infrastructure.skill.SkillTool;
+import com.sxw.sxwaiagent.infrastructure.rag.RagFlowKnowledgeService;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,6 +23,7 @@ public class ToolRegistration {
     @Bean
     public ToolCallback[] allTools(NoteSkill noteSkill,
                                    SkillTool skillTool,
+                                   RagFlowKnowledgeService ragFlowKnowledgeService,
                                    TerminalOperationProperties terminalProperties) {
         FileOperationTool fileOperationTool = new FileOperationTool();
         WebSearchTool webSearchTool = new WebSearchTool(searchApiKey);
@@ -29,6 +31,7 @@ public class ToolRegistration {
         ResourceDownloadTool resourceDownloadTool = new ResourceDownloadTool();
         TerminalOperationTool terminalOperationTool = new TerminalOperationTool(terminalProperties);
         PDFGenerationTool pdfGenerationTool = new PDFGenerationTool();
+        RagFlowSearchTool ragFlowSearchTool = new RagFlowSearchTool(ragFlowKnowledgeService);
         TerminateTool terminateTool = new TerminateTool();
         return ToolCallbacks.from(
                 fileOperationTool,
@@ -37,6 +40,7 @@ public class ToolRegistration {
                 resourceDownloadTool,
                 terminalOperationTool,
                 pdfGenerationTool,
+                ragFlowSearchTool,
                 terminateTool,
                 // 笔记技能，同时通过 MCP 对外暴露
                 noteSkill,

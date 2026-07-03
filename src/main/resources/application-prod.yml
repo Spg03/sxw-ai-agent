@@ -6,17 +6,15 @@
 #   3) jar 包： java -jar app.jar --spring.profiles.active=prod
 #   4) 环境变量：SPRING_PROFILES_ACTIVE=prod
 #
-# !!! 安全警告 !!!
-# 本文件内嵌了一个临时 DashScope API Key，仅用于本机演示。
-# - 演示完成后请立即到阿里云百炼控制台禁用该 Key 并重新签发。
-# - 切勿把本文件 push 到公共仓库；建议把 application-prod.yml 加入 .gitignore。
-# - 长期方案：仍以环境变量 ${DASHSCOPE_API_KEY} 注入，删除下方硬编码值。
+# !!! 安全提醒 !!!
+# 生产 / 公网演示不要在配置文件中写入真实 Key，请统一通过环境变量注入。
+# 对外暴露时建议设置 SXW_SECURITY_API_KEY_ENABLED=true 并配置 SXW_SECURITY_API_KEY。
 # =====================================================================
 
 spring:
   ai:
     dashscope:
-      api-key: ${DASHSCOPE_API_KEY:your-api-key}
+      api-key: ${DASHSCOPE_API_KEY:}
       chat:
         options:
           model: ${DASHSCOPE_CHAT_MODEL:qwen-plus}
@@ -50,6 +48,14 @@ search-api:
 
 # 业务配置：覆盖 application.yml 的默认值
 sxw:
+  security:
+    api-key:
+      enabled: ${SXW_SECURITY_API_KEY_ENABLED:false}
+      value: ${SXW_SECURITY_API_KEY:}
+  agent:
+    trace:
+      max-runs: ${SXW_AGENT_TRACE_MAX_RUNS:100}
+      max-events-per-run: ${SXW_AGENT_TRACE_MAX_EVENTS_PER_RUN:200}
   skill:
     note:
       base-dir: ${NOTE_BASE_DIR:${user.dir}/data/notes}

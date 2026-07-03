@@ -37,10 +37,15 @@ public class LlmAnswerCacheAdvisor implements CallAdvisor {
 
     private static final Logger log = LoggerFactory.getLogger(LlmAnswerCacheAdvisor.class);
 
-    private final Cache<String, ChatClientResponse> cache;
+    private final LlmResponseCache cache;
     private final MeterRegistry meterRegistry;
 
     public LlmAnswerCacheAdvisor(Cache<String, ChatClientResponse> cache,
+                                 MeterRegistry meterRegistry) {
+        this(new CaffeineLlmResponseCache(cache), meterRegistry);
+    }
+
+    public LlmAnswerCacheAdvisor(LlmResponseCache cache,
                                  MeterRegistry meterRegistry) {
         this.cache = cache;
         this.meterRegistry = meterRegistry;
@@ -64,7 +69,7 @@ public class LlmAnswerCacheAdvisor implements CallAdvisor {
             return chain.nextCall(chatClientRequest);
         }
         String key = hashOf(prompt);
-        ChatClientResponse cached = cache.getIfPresent(key);
+        ChatClientResponse cached = cache.get(key);
         if (cached != null) {
             log.info("llm-cache hit key={}", key);
             increment("hit");

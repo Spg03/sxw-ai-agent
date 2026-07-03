@@ -13,6 +13,10 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
       MCP_SERVER_ENABLED: "true"
       NOTE_BASE_DIR: /data/notes
+      SXW_SECURITY_API_KEY_ENABLED: ${SXW_SECURITY_API_KEY_ENABLED:-false}
+      SXW_SECURITY_API_KEY: ${SXW_SECURITY_API_KEY:-}
+      SXW_AGENT_TRACE_MAX_RUNS: ${SXW_AGENT_TRACE_MAX_RUNS:-100}
+      SXW_AGENT_TRACE_MAX_EVENTS_PER_RUN: ${SXW_AGENT_TRACE_MAX_EVENTS_PER_RUN:-200}
     volumes:
       - note-data:/data/notes
     restart: unless-stopped

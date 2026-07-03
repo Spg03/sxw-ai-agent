@@ -1,5 +1,6 @@
 package com.sxw.sxwaiagent.common.api;
 
+import com.sxw.sxwaiagent.common.web.ClientAbortDetector;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +34,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Result<Void>> handleAny(Exception ex) {
+        if (ClientAbortDetector.isClientAbort(ex)) {
+            log.warn("client disconnected: {}", ex.getMessage());
+            return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
+        }
         log.error("unhandled error", ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Result.error(50000, "internal error: " + ex.getClass().getSimpleName()));

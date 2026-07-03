@@ -71,11 +71,13 @@ public class ToolCallAgent extends ReActAgent {
         List<Message> messageList = getMessageList();
         Prompt prompt = new Prompt(messageList, this.chatOptions);
         try {
+            long thinkStart = System.currentTimeMillis();
             ChatResponse chatResponse = getChatClient().prompt(prompt)
                     .system(getSystemPrompt())
                     .toolCallbacks(availableTools)
                     .call()
                     .chatResponse();
+            long thinkLatency = System.currentTimeMillis() - thinkStart;
             // 记录响应，用于等下 Act
             this.toolCallChatResponse = chatResponse;
             // 3、解析工具调用结果，获取要调用的工具
@@ -85,12 +87,16 @@ public class ToolCallAgent extends ReActAgent {
             List<AssistantMessage.ToolCall> toolCallList = assistantMessage.getToolCalls();
             // 输出提示信息
             String result = assistantMessage.getText();
+            traceEvent("think", null, getNextStepPrompt(), result, "ok", thinkLatency);
             log.info(getName() + "的思考：" + result);
             log.info(getName() + "选择了 " + toolCallList.size() + " 个工具来使用");
             String toolCallInfo = toolCallList.stream()
                     .map(toolCall -> String.format("工具名称：%s，参数：%s", toolCall.name(), toolCall.arguments()))
                     .collect(Collectors.joining("\n"));
             log.info(toolCallInfo);
+            for (AssistantMessage.ToolCall toolCall : toolCallList) {
+                traceEvent("tool_call", toolCall.name(), toolCall.arguments(), "", "planned", 0);
+            }
             // 如果不需要调用工具，说明助手已经给出最终答案：保存文本并结束循环
             if (toolCallList.isEmpty()) {
                 // 只有不调用工具时，才需要手动记录助手消息
@@ -103,6 +109,7 @@ public class ToolCallAgent extends ReActAgent {
                 return true;
             }
         } catch (Exception e) {
+            traceEvent("think", null, getNextStepPrompt(), e.getMessage(), "error", 0);
             log.error(getName() + "的思考过程遇到了问题：" + e.getMessage());
             getMessageList().add(new AssistantMessage("处理时遇到了错误：" + e.getMessage()));
             return false;
@@ -140,7 +147,9 @@ public class ToolCallAgent extends ReActAgent {
         }
         // 调用工具
         Prompt prompt = new Prompt(getMessageList(), this.chatOptions);
+        long toolStart = System.currentTimeMillis();
         ToolExecutionResult toolExecutionResult = toolCallingManager.executeToolCalls(prompt, toolCallChatResponse);
+        long toolLatency = System.currentTimeMillis() - toolStart;
         // 记录消息上下文，conversationHistory 已经包含了助手消息和工具调用返回的结果
         setMessageList(toolExecutionResult.conversationHistory());
         ToolResponseMessage toolResponseMessage = (ToolResponseMessage) CollUtil.getLast(toolExecutionResult.conversationHistory());
@@ -154,6 +163,8 @@ public class ToolCallAgent extends ReActAgent {
         String results = toolResponseMessage.getResponses().stream()
                 .map(response -> "工具 " + response.name() + " 返回的结果：" + response.responseData())
                 .collect(Collectors.joining("\n"));
+        toolResponseMessage.getResponses().forEach(response ->
+                traceEvent("tool_result", response.name(), "", response.responseData(), "ok", toolLatency));
         log.info(results);
         return results;
     }

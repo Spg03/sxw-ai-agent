@@ -1,7 +1,9 @@
 package com.sxw.sxwaiagent.web.controller;
 
+import com.sxw.sxwaiagent.common.web.ClientAbortDetector;
 import com.sxw.sxwaiagent.infrastructure.memory.ManusMemoryStore;
 import com.sxw.sxwaiagent.infrastructure.skill.SkillRegistry;
+import com.sxw.sxwaiagent.infrastructure.trace.AgentTraceStore;
 import com.sxw.sxwaiagent.manus.SxwManus;
 import com.sxw.sxwaiagent.love.LoveApp;
 import jakarta.annotation.Resource;
@@ -20,6 +22,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/ai")
@@ -45,6 +48,9 @@ public class AiController {
     @Resource
     private ManusMemoryStore manusMemoryStore;
 
+    @Resource
+    private AgentTraceStore agentTraceStore;
+
     /**
      * 同步调用 AI 恋爱大师应用
      *
@@ -56,6 +62,19 @@ public class AiController {
     public String doChatWithLoveAppSync(@NotBlank @Size(max = 2000) String message,
                                         @NotBlank @Size(max = 64) String chatId) {
         return loveApp.doChat(message, chatId);
+    }
+
+    /**
+     * 同步调用 RAGFlow 增强的 AI 恋爱大师应用
+     *
+     * @param message
+     * @param chatId
+     * @return
+     */
+    @GetMapping("/love_app/chat/ragflow/sync")
+    public String doChatWithLoveAppRagFlowSync(@NotBlank @Size(max = 2000) String message,
+                                               @NotBlank @Size(max = 64) String chatId) {
+        return loveApp.doChatWithRagFlow(message, chatId);
     }
 
     /**
@@ -102,12 +121,31 @@ public class AiController {
         // 获取 Flux 响应式数据流并且直接通过订阅推送给 SseEmitter
         loveApp.doChatByStream(message, chatId)
                 .subscribe(chunk -> {
-                    try {
-                        sseEmitter.send(chunk);
-                    } catch (IOException e) {
-                        sseEmitter.completeWithError(e);
+                    if (chunk == null) {
+                        return;
                     }
-                }, sseEmitter::completeWithError, sseEmitter::complete);
+                    try {
+                        sseEmitter.send(Objects.requireNonNull(chunk));
+                    } catch (IOException e) {
+                        if (ClientAbortDetector.isClientAbort(e)) {
+                            log.info("love_app sse client disconnected: {}", e.getMessage());
+                            sseEmitter.complete();
+                        } else {
+                            sseEmitter.completeWithError(e);
+                        }
+                    }
+                }, ex -> {
+                    if (ex == null) {
+                        sseEmitter.completeWithError(new IllegalStateException("love_app stream error is null"));
+                        return;
+                    }
+                    if (ClientAbortDetector.isClientAbort(ex)) {
+                        log.info("love_app sse client disconnected during stream: {}", ex.getMessage());
+                        sseEmitter.complete();
+                    } else {
+                        sseEmitter.completeWithError(Objects.requireNonNull(ex));
+                    }
+                }, sseEmitter::complete);
         // 返回
         return sseEmitter;
     }
@@ -124,6 +162,7 @@ public class AiController {
                                       @Size(max = 64) String chatId) {
         String safeChatId = (chatId == null || chatId.isBlank()) ? "default" : chatId;
         SxwManus sxwManus = new SxwManus(allTools, dashscopeChatModel, skillRegistry);
+        sxwManus.enableTracing(agentTraceStore, safeChatId);
         // 使用有界、命名、可观测的线程池，替代默认 ForkJoinPool
         sxwManus.setExecutor(agentTaskExecutor);
         // 1、加载历史 → messageList

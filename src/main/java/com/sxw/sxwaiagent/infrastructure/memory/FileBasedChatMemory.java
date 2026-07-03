@@ -4,6 +4,8 @@ import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
 import org.objenesis.strategy.StdInstantiatorStrategy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
 
@@ -18,6 +20,8 @@ import java.util.List;
  * 基于文件持久化的对话记忆
  */
 public class FileBasedChatMemory implements ChatMemory {
+
+    private static final Logger log = LoggerFactory.getLogger(FileBasedChatMemory.class);
 
     private final String BASE_DIR;
     private static final Kryo kryo = new Kryo();
@@ -64,7 +68,7 @@ public class FileBasedChatMemory implements ChatMemory {
             try (Input input = new Input(new FileInputStream(file))) {
                 messages = kryo.readObject(input, ArrayList.class);
             } catch (IOException e) {
-                e.printStackTrace();
+                log.warn("failed to read chat memory conversationId={}: {}", conversationId, e.getMessage());
             }
         }
         return messages;
@@ -75,7 +79,7 @@ public class FileBasedChatMemory implements ChatMemory {
         try (Output output = new Output(new FileOutputStream(file))) {
             kryo.writeObject(output, messages);
         } catch (IOException e) {
-            e.printStackTrace();
+            log.warn("failed to save chat memory conversationId={}: {}", conversationId, e.getMessage());
         }
     }
 

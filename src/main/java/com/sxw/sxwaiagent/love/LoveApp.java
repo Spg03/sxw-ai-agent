@@ -7,6 +7,7 @@ import com.sxw.sxwaiagent.infrastructure.resilience.DashScopeResilienceAdvisor;
 import com.sxw.sxwaiagent.infrastructure.memory.FileBasedChatMemory;
 import com.sxw.sxwaiagent.infrastructure.rag.LoveAppRagCustomAdvisorFactory;
 import com.sxw.sxwaiagent.infrastructure.rag.QueryRewriter;
+import com.sxw.sxwaiagent.infrastructure.rag.RagFlowKnowledgeService;
 import jakarta.annotation.Resource;
 import org.springframework.beans.factory.ObjectProvider;
 import lombok.extern.slf4j.Slf4j;
@@ -148,6 +149,9 @@ public class LoveApp {
     @Resource
     private QueryRewriter queryRewriter;
 
+    @Resource
+    private RagFlowKnowledgeService ragFlowKnowledgeService;
+
     /**
      * 和 RAG 知识库进行对话
      *
@@ -181,6 +185,30 @@ public class LoveApp {
                 .chatResponse();
         String content = chatResponse.getResult().getOutput().getText();
         log.info("content: {}", content);
+        return content;
+    }
+
+    /**
+     * 和 RAGFlow 知识库进行对话：RAGFlow 负责检索，本项目继续负责生成。
+     *
+     * @param message
+     * @param chatId
+     * @return
+     */
+    public String doChatWithRagFlow(String message, String chatId) {
+        String rewrittenMessage = queryRewriter.doQueryRewrite(message);
+        String ragFlowContext = ragFlowKnowledgeService.retrieveContext(rewrittenMessage);
+        String userPrompt = ragFlowContext == null || ragFlowContext.isBlank()
+                ? rewrittenMessage
+                : ragFlowContext + "\n\nUser question:\n" + rewrittenMessage;
+        ChatResponse chatResponse = chatClient
+                .prompt()
+                .user(userPrompt)
+                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                .call()
+                .chatResponse();
+        String content = chatResponse.getResult().getOutput().getText();
+        log.info("ragflow content: {}", content);
         return content;
     }
 

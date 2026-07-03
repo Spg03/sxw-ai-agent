@@ -1,194 +1,173 @@
 # sxw-ai-agent
 
-> 基于 **Spring AI Alibaba** 的生产级 LLM Agent 平台。集成 RAG、多工具 ReAct 智能体、MCP 协议互通、Anthropic Agent Skills、自动化评测流水线、Prometheus 可观测，以及完整 Docker / GitHub Actions CI/CD。
+一个基于 Spring Boot 3.4、Spring AI Alibaba 和 JDK 21 的企业化 AI Agent 示例项目。项目围绕“可运行、可观测、可扩展、可验证”设计，适合作为简历项目展示 Spring AI、Agent 工具调用、RAG、MCP、缓存、限流熔断、评测与运维监控能力。
 
-<!-- 替换 OWNER/REPO 为你的 GitHub 仓库 slug -->
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
-[![Eval Suite](https://github.com/OWNER/REPO/actions/workflows/eval.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/eval.yml)
-[![Docker](https://img.shields.io/badge/ghcr.io-OWNER%2FREPO-2496ED?logo=docker)](https://github.com/OWNER/REPO/pkgs/container/repo)
-[![JDK](https://img.shields.io/badge/JDK-21-orange?logo=openjdk)](https://openjdk.org/projects/jdk/21/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4-6DB33F?logo=spring)](https://spring.io/projects/spring-boot)
-[![Spring AI](https://img.shields.io/badge/Spring%20AI%20Alibaba-1.0-blueviolet)](https://java2ai.com/)
+## 项目定位
 
----
+`sxw-ai-agent` 不是单纯的聊天 Demo，而是一个后端工程化 AI Agent 项目：
 
-## 🎯 一句话定位
+- LoveApp：面向情感咨询场景的领域 Agent，支持会话记忆、RAG、结构化输出和流式响应。
+- SxwManus：通用 ReAct Agent，按请求创建实例，避免并发状态污染，支持工具调用、技能按需加载和运行轨迹追踪。
+- MCP Server：将内部技能暴露给 Codex Desktop、Cursor 等外部 Agent 客户端。
+- 质量体系：提供单元测试、评测数据集、Micrometer 指标、Resilience4j 保护和 Docker 部署样例。
 
-一套**可以直接给面试官跑起来**的 LLM Agent 工程化范例：从 prompt 设计到 RAG，从 ReAct 调度到 MCP 协议，从评测看门到 Prometheus 大盘 —— **每一层都有可验证的工程产物**。
-
-## ✨ 核心特性
-
-| 维度 | 落地点 |
-|---|---|
-| 🤖 **LoveApp**（情感顾问） | RAG（SimpleVectorStore + 关键词增强 + 查询重写）+ ChatMemory + 自定义 Advisor 链 |
-| 🦾 **SxwManus**（通用智能体） | ReAct 循环 + 7 个 Tool（文件 / 搜索 / 抓网页 / 终端 / PDF / 终止 / 资源下载） |
-| 🔌 **MCP Server** | 通过 SSE 把 NoteSkill / SkillTool 暴露给外部 Agent（Claude Desktop / Cursor 零适配） |
-| 📜 **Agent Skills** | Anthropic 规范的 Java 实现：`SKILL.md` + frontmatter，progressive disclosure 节省 ~85% prompt token |
-| 🧪 **Evaluation Harness** | YAML 黄金集 + 三类评估器（关键词 / LLM-as-Judge / 延迟阈值），输出 markdown 报告，CI 守门 |
-| 📊 **可观测** | Micrometer + Prometheus + 前端实时大盘（缓存命中率 / Token 累计 / Agent 步数 / 错误率） |
-| 🛡️ **工具沙箱** | 笔记目录隔离 + 路径穿越防护 + 终端命令白名单 + 单文件大小上限 |
-| 🚀 **生产化** | 多阶段 Dockerfile（非 root + healthcheck）、docker-compose、GitHub Actions（CI + Eval）、GHCR 镜像 |
-
-## 🏗️ 架构
+## 架构图
 
 ```mermaid
 flowchart LR
-  subgraph Client["客户端"]
-    Web["Web SPA<br/>(Notes/Skills/Metrics)"]
-    Claude["外部 Agent<br/>(Claude Desktop/Cursor)"]
-  end
-
-  subgraph App["sxw-ai-agent (Spring Boot 3.4 / JDK 21)"]
-    direction TB
-    Ctl["AiController<br/>SkillController<br/>NotesController"]
-    LoveApp["LoveApp<br/>(RAG + ChatMemory)"]
-    Manus["SxwManus<br/>(ReAct Loop)"]
-    Advisor["MyLoggerAdvisor<br/>(Micrometer + 链路日志)"]
-    Skills["SkillRegistry<br/>(Agent Skills)"]
-    Tools["ToolCallback[]<br/>File/Web/Term/PDF/Note"]
-    MCP["MCP Server<br/>(SSE)"]
-    Eval["EvalRunner<br/>+ LlmJudgeEvaluator"]
-  end
-
-  subgraph Infra["基础设施"]
-    DashScope["DashScope<br/>(qwen3.5-plus)"]
-    Ollama["Ollama<br/>(本地降级)"]
-    VS["VectorStore<br/>(SimpleVectorStore<br/>→ PgVector)"]
-    Prom["Prometheus<br/>+ Grafana"]
-  end
-
-  Web -->|SSE / REST| Ctl
-  Claude -->|MCP SSE| MCP
-  Ctl --> LoveApp & Manus & Skills
-  LoveApp --> Advisor --> DashScope
-  Manus --> Tools & Skills
-  Skills --> Tools
-  Tools --> MCP
-  LoveApp --> VS
-  Advisor --> Prom
-  Eval -.->|端到端打分| LoveApp
+    Browser["Static SPA"] --> Controller["Spring MVC Controllers"]
+    Controller --> LoveApp["LoveApp Domain Agent"]
+    Controller --> Manus["SxwManus ReAct Agent"]
+    Manus --> Skills["SkillRegistry / SkillTool"]
+    Manus --> Tools["Tool Sandbox / Notes / RAGFlow"]
+    LoveApp --> Rag["RAG Advisor / Vector Store / RAGFlow"]
+    LoveApp --> LLM["DashScope qwen-plus"]
+    Manus --> LLM
+    Controller --> Trace["In-memory AgentTraceStore"]
+    Metrics["Actuator / Prometheus"] --> Browser
+    Skills --> MCP["MCP SSE Server"]
 ```
 
-## 🚀 快速启动
+## 核心能力
 
-### 方式 A：Docker Compose（推荐）
+- Agent 编排：`BaseAgent -> ReActAgent -> ToolCallAgent -> SxwManus` 分层清晰，支持同步和 SSE 流式执行。
+- 工具调用：通过 Spring AI `ToolCallback` 接入笔记、技能、搜索、RAGFlow 等工具；终端工具默认关闭并带白名单。
+- RAG 增强：内置本地向量检索链路，并可按环境变量接入本机 RAGFlow。
+- 运行轨迹：Manus 每次执行记录 `traceId`、`chatId`、阶段、工具名、输入/输出摘要、状态和耗时。
+- 可观测性：Actuator、Prometheus、LLM 缓存命中率、token、延迟和 Agent 步骤指标。
+- 安全治理：可选 API Key 拦截器保护 `/ai/**`、`/notes/**`、`/skills/**`、`/agent/**`。
+- 测试与评测：普通单测默认不消耗 LLM token；评测套件需要手动启用。
+
+## 环境要求
+
+- JDK 21
+- Maven 3.9+
+- DashScope API Key
+- 可选：本机 RAGFlow，默认地址 `http://localhost:9380`
+
+> 常见问题：如果本机是 Java 17，直接运行 `mvn test` 会报“不支持发行版本 21”。请安装 JDK 21，并确认 `java -version` 与 `mvn -version` 都指向 JDK 21。
+
+## 快速启动
+
+复制环境变量模板：
 
 ```bash
-# 1. 复制环境变量模板
-cp .env.example .env  # 然后填入 DASHSCOPE_API_KEY 等
-
-# 2. 启动
-docker compose up -d
-
-# 3. 浏览器打开
-open http://localhost:8123/api
+cp .env.example .env
 ```
 
-### 方式 B：本地开发
+至少配置：
 
 ```bash
-# 需要 JDK 21
-export DASHSCOPE_API_KEY=sk-xxx
+DASHSCOPE_API_KEY=sk-xxx
+DASHSCOPE_CHAT_MODEL=qwen-plus
+```
+
+启动应用：
+
+```bash
 mvn spring-boot:run
-
-# 端口 8123，context-path /api
-curl http://localhost:8123/api/health
 ```
 
-### 方式 C：拉 GHCR 镜像直接跑
+访问：
+
+- 健康检查：http://localhost:8123/api/health
+- 前端页面：http://localhost:8123/api/
+- API 文档：http://localhost:8123/api/doc.html
+- Actuator：http://localhost:8123/api/actuator/health
+
+## RAGFlow 接入
+
+默认关闭，避免影响本地开发。接入本机 RAGFlow 时配置：
 
 ```bash
-docker run --rm -p 8123:8123 \
-  -e DASHSCOPE_API_KEY=sk-xxx \
-  ghcr.io/owner/repo:latest
+RAGFLOW_ENABLED=true
+RAGFLOW_BASE_URL=http://localhost:9380
+RAGFLOW_API_KEY=<your-ragflow-api-key>
+RAGFLOW_DATASET_IDS=<dataset-id-1,dataset-id-2>
 ```
 
-## 🧪 跑评测
+LoveApp RAGFlow 接口：
+
+```http
+GET /api/ai/love_app/chat/ragflow/sync?message=...&chatId=...
+```
+
+## API Key 保护
+
+本地默认关闭。公网演示或部署时建议开启：
 
 ```bash
-# 默认 mvn test 跳过 eval（不烧 token）
+SXW_SECURITY_API_KEY_ENABLED=true
+SXW_SECURITY_API_KEY=<strong-random-value>
+```
+
+开启后，请求以下接口需要请求头：
+
+```http
+X-SXW-API-Key: <strong-random-value>
+```
+
+受保护路径：
+
+- `/api/ai/**`
+- `/api/notes/**`
+- `/api/skills/**`
+- `/api/agent/**`
+
+## Manus 运行轨迹
+
+查询最近运行轨迹：
+
+```http
+GET /api/agent/traces/{chatId}?limit=5
+```
+
+配置容量：
+
+```bash
+SXW_AGENT_TRACE_MAX_RUNS=100
+SXW_AGENT_TRACE_MAX_EVENTS_PER_RUN=200
+```
+
+前端 Manus 面板会展示最近一次执行时间线，便于观察 Agent 思考、工具调用、工具返回和完成状态。
+
+## 测试
+
+普通测试：
+
+```bash
 mvn test
-
-# 手动跑端到端评测，报告输出到 target/eval-report.md
-mvn -Dgroups=eval test -Dtest=LoveAppEvalSuiteTest
-
-# CI 触发：手动 / 每周一 02:00 UTC / PR 加 run-eval 标签
-# 见 .github/workflows/eval.yml
 ```
 
-数据集：`src/main/resources/eval/love-app.yaml`（6 条覆盖 empathy / structure / safety / refusal / chinese 五个类别）
-
-## 📦 Agent Skills
-
-把领域知识打包成文件夹，启动期只读摘要进 prompt，命中后通过 `loadSkill` 工具加载完整正文：
-
-```
-src/main/resources/skills/
-├── love-counsel/SKILL.md      # 情感咨询操作手册
-└── note-workflow/SKILL.md     # 笔记整理工作流
-```
-
-REST 调试：
+CI 验证：
 
 ```bash
-curl http://localhost:8123/api/skills              # 列摘要
-curl http://localhost:8123/api/skills/love-counsel # 完整正文
+mvn verify
 ```
 
-前端 **Skills** tab 直接可视化所有 skill 与 SKILL.md 内容。
+评测套件默认排除，避免消耗 LLM token。需要手动运行：
 
-## 📊 可观测
-
-- `GET /api/actuator/health`
-- `GET /api/actuator/prometheus`
-- 前端 **监控面板** tab：LLM 缓存命中率 / Token 累计 / 平均延迟 / Agent 步数分布
-
-关键 Metric：
-
-| 指标 | 含义 |
-|---|---|
-| `ai_chat_cache_total{outcome}` | 语义缓存命中 / miss-stored / miss-skipped |
-| `ai_chat_tokens_total{kind}` | prompt / completion / total tokens |
-| `ai_chat_latency_seconds` | 端到端延迟（P50/P99） |
-| `ai_agent_steps_total` | Manus ReAct 单次任务步数分布 |
-
-## 🔧 关键工程决策
-
-- **MCP 解耦**：技能（NoteSkill / SkillTool）以 `@Tool` 注解定义，本进程 Agent 与外部 MCP 客户端**同一份代码**，避免重复实现。
-- **Manus 非单例**：`SxwManus` 持有会话级可变状态，每次请求 `new` 实例，规避并发污染；线程池显式可观测（`agentTaskExecutor`）。
-- **History trim**：`ToolCallAgent.trimHistoryIfNeeded()` 防 token 爆炸。
-- **JsonOutput judge**：自写 LLM Judge 强约束 JSON 输出 + markdown 围栏降级，**实现 Spring AI `Evaluator` 接口**可与官方 `RelevancyEvaluator` 互换。
-- **Surefire excludedGroups=eval**：默认 `mvn test` 不烧 token，CI 友好。
-
-## 🗺️ Roadmap
-
-- [ ] PgVector 持久化 + JdbcChatMemoryRepository
-- [ ] PromptShield Advisor（注入检测）+ PII 出口脱敏
-- [ ] 多模型路由（DashScope ↔ Ollama 降级）
-- [ ] Agent 推理路径前端可视化（React Flow）
-- [ ] Tool 插件热加载（OpenAPI spec → ToolCallback）
-
-## 📁 目录速览
-
-```
-src/main/java/com/sxw/sxwaiagent/
-├── love/                LoveApp + Advisors + 文档加载
-├── manus/               SxwManus / ReActAgent / ToolCallAgent
-├── infrastructure/
-│   ├── advisor/         MyLoggerAdvisor (Micrometer)
-│   ├── eval/            评测流水线
-│   ├── rag/             向量库 + 关键词增强 + 查询重写
-│   ├── skill/           Agent Skills + NoteSkill
-│   └── tools/           7 个 ToolCallback
-├── mcp/                 MCP server 配置
-└── web/controller/      AiController / SkillController / NotesController
-
-src/main/resources/
-├── eval/love-app.yaml   评测黄金集
-├── skills/*/SKILL.md    Agent Skills
-└── static/index.html    前端 SPA
+```bash
+mvn test -Dgroups=eval -Dtest=LoveAppEvalSuiteTest
 ```
 
-## 📜 License
+## Docker
 
-MIT
+```bash
+docker compose --env-file .env up -d --build
+```
+
+生产 / 演示环境不要把真实 Key 写入仓库，请通过环境变量或密钥管理系统注入。
+
+## 简历话术
+
+可以这样描述这个项目：
+
+> 设计并实现了一个基于 Spring AI 的企业级 AI Agent 平台，支持领域 Agent、ReAct 通用 Agent、MCP 技能暴露、RAGFlow 知识库增强、工具沙箱、LLM 调用缓存、限流熔断、Prometheus 监控、Agent 运行轨迹可视化和自动化评测。项目通过分层 Agent 架构、按请求实例化、内存 trace store、可选 API Key 鉴权和 CI 测试，提高了 AI 应用在可观测性、安全性和工程可维护性上的完整度。
+
+## 后续规划
+
+- 将内存向量库切换为 PgVector，并补全数据库迁移脚本。
+- 将静态页面迁移为独立前端工程，加入 API Key 配置、登录态和更完整的可观测面板。
+- 将 Agent trace、会话记忆和评测报告持久化，便于长期分析。
+- 补充 GitHub Actions、Docker 镜像发布和线上演示环境。

@@ -1,6 +1,8 @@
 package com.sxw.sxwaiagent.manus;
 
 import cn.hutool.core.util.StrUtil;
+import com.sxw.sxwaiagent.common.web.ClientAbortDetector;
+import com.sxw.sxwaiagent.infrastructure.trace.AgentTraceStore;
 import com.sxw.sxwaiagent.manus.model.AgentState;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -69,8 +71,35 @@ public abstract class BaseAgent {
     private Runnable onFinished;
     private final AtomicBoolean onFinishedFired = new AtomicBoolean(false);
 
+    private AgentTraceStore agentTraceStore;
+    private String traceId;
+
     public void setOnFinished(Runnable onFinished) {
         this.onFinished = onFinished;
+    }
+
+    public void enableTracing(AgentTraceStore agentTraceStore, String chatId) {
+        this.agentTraceStore = agentTraceStore;
+        this.traceId = agentTraceStore == null ? null : agentTraceStore.startRun(chatId);
+    }
+
+    protected void traceEvent(String phase,
+                              String toolName,
+                              String inputSummary,
+                              String outputSummary,
+                              String status,
+                              long latencyMs) {
+        if (agentTraceStore == null || traceId == null) {
+            return;
+        }
+        agentTraceStore.appendEvent(traceId, currentStep, phase, toolName, inputSummary, outputSummary, status, latencyMs);
+    }
+
+    protected void finishTrace(String status) {
+        if (agentTraceStore == null || traceId == null) {
+            return;
+        }
+        agentTraceStore.finishRun(traceId, status);
     }
 
     private void invokeOnFinishedSafely() {
@@ -127,6 +156,7 @@ public abstract class BaseAgent {
         }
         // 2、执行，更改状态
         this.state = AgentState.RUNNING;
+        traceEvent("run_start", null, safeUserPrompt, "", "ok", 0);
         // 记录消息上下文
         messageList.add(new UserMessage(safeUserPrompt));
         // 保存结果列表
@@ -138,7 +168,9 @@ public abstract class BaseAgent {
                 currentStep = stepNumber;
                 log.info("Executing step {}/{}", stepNumber, maxSteps);
                 // 单步执行
+                long stepStart = System.currentTimeMillis();
                 String stepResult = step();
+                traceEvent("step", null, "", stepResult, "ok", System.currentTimeMillis() - stepStart);
                 String result = "Step " + stepNumber + ": " + stepResult;
                 results.add(result);
             }
@@ -150,9 +182,11 @@ public abstract class BaseAgent {
             return String.join("\n", results);
         } catch (Exception e) {
             state = AgentState.ERROR;
+            traceEvent("error", null, safeUserPrompt, e.getMessage(), "error", 0);
             log.error("error executing agent", e);
             return "执行错误" + e.getMessage();
         } finally {
+            finishTrace(state == AgentState.ERROR ? "error" : "finished");
             // 3、走一次持久化钩子，再清理资源
             invokeOnFinishedSafely();
             this.cleanup();
@@ -184,11 +218,20 @@ public abstract class BaseAgent {
                     return;
                 }
             } catch (Exception e) {
+                if (ClientAbortDetector.isClientAbort(e)) {
+                    log.info("agent={} sse client disconnected during validation: {}", name, e.getMessage());
+                    try {
+                        sseEmitter.complete();
+                    } catch (Exception ignore) {
+                    }
+                    return;
+                }
                 sseEmitter.completeWithError(e);
                 return;
             }
             // 2、执行，更改状态
             this.state = AgentState.RUNNING;
+            traceEvent("run_start", null, safeUserPrompt, "", "ok", 0);
             // 记录消息上下文
             messageList.add(new UserMessage(safeUserPrompt));
             // 保存结果列表
@@ -202,7 +245,9 @@ public abstract class BaseAgent {
                     loopedSteps = stepNumber;
                     log.info("Executing step {}/{}", stepNumber, maxSteps);
                     // 单步执行
+                    long stepStart = System.currentTimeMillis();
                     String stepResult = step();
+                    traceEvent("step", null, "", stepResult, "ok", System.currentTimeMillis() - stepStart);
                     String result = "Step " + stepNumber + ": " + stepResult;
                     results.add(result);
                     // 作为“思考过程”中间事件输出到 SSE，前端能在 “思考过程”面板里折叠展示
@@ -224,15 +269,34 @@ public abstract class BaseAgent {
                 // 正常完成
                 sseEmitter.complete();
             } catch (Exception e) {
+                if (ClientAbortDetector.isClientAbort(e)) {
+                    state = AgentState.FINISHED;
+                    log.info("agent={} sse client disconnected: {}", name, e.getMessage());
+                    try {
+                        sseEmitter.complete();
+                    } catch (Exception ignore) {
+                    }
+                    return;
+                }
                 state = AgentState.ERROR;
+                traceEvent("error", null, safeUserPrompt, e.getMessage(), "error", 0);
                 log.error("error executing agent", e);
                 try {
                     sseEmitter.send(SseEmitter.event().name("error").data("执行错误：" + e.getMessage()));
                     sseEmitter.complete();
                 } catch (IOException ex) {
-                    sseEmitter.completeWithError(ex);
+                    if (ClientAbortDetector.isClientAbort(ex)) {
+                        log.info("agent={} sse client disconnected while reporting error: {}", name, ex.getMessage());
+                        try {
+                            sseEmitter.complete();
+                        } catch (Exception ignore) {
+                        }
+                    } else {
+                        sseEmitter.completeWithError(ex);
+                    }
                 }
             } finally {
+                finishTrace(state == AgentState.ERROR ? "error" : "finished");
                 // 3、企业持久化钩子优先在这里调用 —— 后面的 sseEmitter.onCompletion 可能因
                 //   客户端提前断开、容器调度等原因不被触发，这里是确定性的路径。
                 invokeOnFinishedSafely();
@@ -243,6 +307,8 @@ public abstract class BaseAgent {
         // 设置超时回调
         sseEmitter.onTimeout(() -> {
             this.state = AgentState.ERROR;
+            traceEvent("error", null, "", "sse timeout", "error", 0);
+            finishTrace("error");
             invokeOnFinishedSafely();
             this.cleanup();
             log.warn("SSE connection timeout");
@@ -252,6 +318,7 @@ public abstract class BaseAgent {
             if (this.state == AgentState.RUNNING) {
                 this.state = AgentState.FINISHED;
             }
+            finishTrace(this.state == AgentState.ERROR ? "error" : "finished");
             invokeOnFinishedSafely();
             this.cleanup();
             log.info("SSE connection completed");
