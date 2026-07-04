@@ -117,13 +117,14 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                         continue;
                     }
                     
-                    // 执行工具
+                    // 执行工具（带 Profile 风险评估）
                     ToolResult toolResult = toolExecutor.execute(
                             toolCall.name(),
                             toolCall.arguments(),
                             context.requestId(),
                             context.traceId(),
-                            turn
+                            turn,
+                            profile
                     );
                     
                     // 记录工具调用信息
