@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -113,7 +114,10 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                     if (!profile.enabledToolNames().contains(toolCall.name())) {
                         log.warn("[{}] Tool {} is not enabled for profile {}",
                                 context.requestId(), toolCall.name(), profile.code());
-                        messages.add(new UserMessage("Error: Tool " + toolCall.name() + " is not available for this profile."));
+                        messages.add(new ToolResponseMessage(List.of(
+                                new ToolResponseMessage.ToolResponse(toolCall.id(), toolCall.name(),
+                                        "Error: Tool " + toolCall.name() + " is not available for this profile.")
+                        )));
                         continue;
                     }
                     
@@ -134,8 +138,10 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                             toolResult.content()
                     ));
                     
-                    // 将工具结果作为 UserMessage 加入上下文（模拟 ToolResponseMessage）
-                    messages.add(new UserMessage("Tool result for " + toolCall.name() + ": " + toolResult.content()));
+                    // 将工具结果作为 ToolResponseMessage 加入上下文（正确的消息类型）
+                    messages.add(new ToolResponseMessage(List.of(
+                            new ToolResponseMessage.ToolResponse(toolCall.id(), toolCall.name(), toolResult.content())
+                    )));
                 }
                 
                 // 继续循环

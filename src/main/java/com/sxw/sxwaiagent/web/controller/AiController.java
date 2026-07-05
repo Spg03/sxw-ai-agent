@@ -6,124 +6,106 @@ import com.sxw.sxwaiagent.infrastructure.skill.SkillRegistry;
 import com.sxw.sxwaiagent.infrastructure.trace.AgentTraceStore;
 import com.sxw.sxwaiagent.manus.SxwManus;
 import com.sxw.sxwaiagent.love.LoveApp;
-import jakarta.annotation.Resource;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 
 @RestController
 @RequestMapping("/ai")
 @Validated
 @Slf4j
+@Tag(name = "AI 对话", description = "AI 恋爱大师 & Manus 超级智能体")
 public class AiController {
 
-    @Resource
-    private LoveApp loveApp;
+    private final LoveApp loveApp;
+    private final ToolCallback[] allTools;
+    private final ChatModel dashscopeChatModel;
+    private final Executor agentTaskExecutor;
+    private final SkillRegistry skillRegistry;
+    private final ManusMemoryStore manusMemoryStore;
+    private final AgentTraceStore agentTraceStore;
 
-    @Resource
-    private ToolCallback[] allTools;
+    public AiController(LoveApp loveApp,
+                        ToolCallback[] allTools,
+                        ChatModel dashscopeChatModel,
+                        @Qualifier("agentTaskExecutor") Executor agentTaskExecutor,
+                        SkillRegistry skillRegistry,
+                        ManusMemoryStore manusMemoryStore,
+                        AgentTraceStore agentTraceStore) {
+        this.loveApp = loveApp;
+        this.allTools = allTools;
+        this.dashscopeChatModel = dashscopeChatModel;
+        this.agentTaskExecutor = agentTaskExecutor;
+        this.skillRegistry = skillRegistry;
+        this.manusMemoryStore = manusMemoryStore;
+        this.agentTraceStore = agentTraceStore;
+    }
 
-    @Resource
-    private ChatModel dashscopeChatModel;
-
-    @Resource(name = "agentTaskExecutor")
-    private java.util.concurrent.Executor agentTaskExecutor;
-
-    @Resource
-    private SkillRegistry skillRegistry;
-
-    @Resource
-    private ManusMemoryStore manusMemoryStore;
-
-    @Resource
-    private AgentTraceStore agentTraceStore;
-
-    /**
-     * 同步调用 AI 恋爱大师应用
-     *
-     * @param message
-     * @param chatId
-     * @return
-     */
     @GetMapping("/love_app/chat/sync")
-    public String doChatWithLoveAppSync(@NotBlank @Size(max = 2000) String message,
-                                        @NotBlank @Size(max = 64) String chatId) {
+    @Operation(summary = "同步对话", description = "同步调用 AI 恋爱大师应用")
+    public String doChatWithLoveAppSync(
+            @Parameter(description = "用户消息") @RequestParam @NotBlank @Size(max = 2000) String message,
+            @Parameter(description = "会话ID") @RequestParam @NotBlank @Size(max = 64) String chatId) {
         return loveApp.doChat(message, chatId);
     }
 
-    /**
-     * 同步调用 RAGFlow 增强的 AI 恋爱大师应用
-     *
-     * @param message
-     * @param chatId
-     * @return
-     */
     @GetMapping("/love_app/chat/ragflow/sync")
-    public String doChatWithLoveAppRagFlowSync(@NotBlank @Size(max = 2000) String message,
-                                               @NotBlank @Size(max = 64) String chatId) {
+    @Operation(summary = "RAGFlow 同步对话", description = "同步调用 RAGFlow 增强的 AI 恋爱大师应用")
+    public String doChatWithLoveAppRagFlowSync(
+            @Parameter(description = "用户消息") @RequestParam @NotBlank @Size(max = 2000) String message,
+            @Parameter(description = "会话ID") @RequestParam @NotBlank @Size(max = 64) String chatId) {
         return loveApp.doChatWithRagFlow(message, chatId);
     }
 
-    /**
-     * SSE 流式调用 AI 恋爱大师应用
-     *
-     * @param message
-     * @param chatId
-     * @return
-     */
     @GetMapping(value = "/love_app/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> doChatWithLoveAppSSE(@NotBlank @Size(max = 2000) String message,
-                                             @NotBlank @Size(max = 64) String chatId) {
+    @Operation(summary = "SSE 流式对话", description = "SSE 流式调用 AI 恋爱大师应用")
+    public Flux<String> doChatWithLoveAppSSE(
+            @Parameter(description = "用户消息") @RequestParam @NotBlank @Size(max = 2000) String message,
+            @Parameter(description = "会话ID") @RequestParam @NotBlank @Size(max = 64) String chatId) {
         return loveApp.doChatByStream(message, chatId);
     }
 
-    /**
-     * SSE 流式调用 AI 恋爱大师应用
-     *
-     * @param message
-     * @param chatId
-     * @return
-     */
     @GetMapping(value = "/love_app/chat/server_sent_event")
-    public Flux<ServerSentEvent<String>> doChatWithLoveAppServerSentEvent(@NotBlank @Size(max = 2000) String message,
-                                                                          @NotBlank @Size(max = 64) String chatId) {
+    @Operation(summary = "ServerSentEvent 流式对话", description = "ServerSentEvent 流式调用 AI 恋爱大师应用")
+    public Flux<ServerSentEvent<String>> doChatWithLoveAppServerSentEvent(
+            @Parameter(description = "用户消息") @RequestParam @NotBlank @Size(max = 2000) String message,
+            @Parameter(description = "会话ID") @RequestParam @NotBlank @Size(max = 64) String chatId) {
         return loveApp.doChatByStream(message, chatId)
                 .map(chunk -> ServerSentEvent.<String>builder()
                         .data(chunk)
                         .build());
     }
 
-    /**
-     * SSE 流式调用 AI 恋爱大师应用
-     *
-     * @param message
-     * @param chatId
-     * @return
-     */
     @GetMapping(value = "/love_app/chat/sse_emitter")
-    public SseEmitter doChatWithLoveAppServerSseEmitter(@NotBlank @Size(max = 2000) String message,
-                                                        @NotBlank @Size(max = 64) String chatId) {
-        // 创建一个超时时间较长的 SseEmitter
-        SseEmitter sseEmitter = new SseEmitter(180000L); // 3 分钟超时
-        // 获取 Flux 响应式数据流并且直接通过订阅推送给 SseEmitter
+    @Operation(summary = "SseEmitter 流式对话", description = "SseEmitter 流式调用 AI 恋爱大师应用")
+    public SseEmitter doChatWithLoveAppServerSseEmitter(
+            @Parameter(description = "用户消息") @RequestParam @NotBlank @Size(max = 2000) String message,
+            @Parameter(description = "会话ID") @RequestParam @NotBlank @Size(max = 64) String chatId) {
+        SseEmitter sseEmitter = new SseEmitter(180000L);
         loveApp.doChatByStream(message, chatId)
                 .subscribe(chunk -> {
-                    if (chunk == null) {
-                        return;
-                    }
+                    if (chunk == null) return;
                     try {
                         sseEmitter.send(Objects.requireNonNull(chunk));
                     } catch (IOException e) {
@@ -146,41 +128,31 @@ public class AiController {
                         sseEmitter.completeWithError(Objects.requireNonNull(ex));
                     }
                 }, sseEmitter::complete);
-        // 返回
         return sseEmitter;
     }
 
-    /**
-     * 流式调用 Manus 超级智能体。
-     * <p>接入 {@link ManusMemoryStore} 后，同一 {@code chatId} 跨请求共享对话记忆。</p>
-     *
-     * @param message 用户消息
-     * @param chatId  会话 id，前端需保证同会话多次请求传同一值（缺省为 {@code default}）
-     */
     @GetMapping("/manus/chat")
-    public SseEmitter doChatWithManus(@NotBlank @Size(max = 2000) String message,
-                                      @Size(max = 64) String chatId) {
+    @Operation(summary = "Manus 流式对话", description = "流式调用 Manus 超级智能体，支持跨请求对话记忆")
+    public SseEmitter doChatWithManus(
+            @Parameter(description = "用户消息") @RequestParam @NotBlank @Size(max = 2000) String message,
+            @Parameter(description = "会话ID（缺省 default）") @RequestParam(required = false) @Size(max = 64) String chatId) {
         String safeChatId = (chatId == null || chatId.isBlank()) ? "default" : chatId;
         SxwManus sxwManus = new SxwManus(allTools, dashscopeChatModel, skillRegistry);
         sxwManus.enableTracing(agentTraceStore, safeChatId);
-        // 使用有界、命名、可观测的线程池，替代默认 ForkJoinPool
         sxwManus.setExecutor(agentTaskExecutor);
-        // 1、加载历史 → messageList
         java.util.List<org.springframework.ai.chat.messages.Message> history = manusMemoryStore.load(safeChatId);
         if (!history.isEmpty()) {
             sxwManus.getMessageList().addAll(history);
         }
         log.info("manus memory loaded: chatId={} restored={} msgs", safeChatId, history.size());
-        // 2、结束后回写最新 messageList 到 store
         sxwManus.setOnFinished(() -> manusMemoryStore.save(safeChatId, sxwManus.getMessageList()));
         return sxwManus.runStream(message);
     }
 
-    /**
-     * 清空指定 Manus 会话的记忆（测试 / “新会话” 按钮使用）。
-     */
-    @GetMapping("/manus/clear")
-    public String clearManusMemory(@NotBlank @Size(max = 64) String chatId) {
+    @DeleteMapping("/manus/memory/{chatId}")
+    @Operation(summary = "清空会话记忆", description = "清空指定 Manus 会话的记忆")
+    public String clearManusMemory(
+            @Parameter(description = "会话ID") @NotBlank @Size(max = 64) @PathVariable String chatId) {
         manusMemoryStore.clear(chatId);
         return "ok";
     }

@@ -1,7 +1,8 @@
 package com.sxw.sxwaiagent.manus;
 
-import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -9,7 +10,8 @@ import lombok.extern.slf4j.Slf4j;
  * 实现了思考-行动的循环模式
  */
 @EqualsAndHashCode(callSuper = true)
-@Data
+@Getter
+@Setter
 @Slf4j
 public abstract class ReActAgent extends BaseAgent {
 

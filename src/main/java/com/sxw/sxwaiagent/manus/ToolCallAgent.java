@@ -4,8 +4,9 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.sxw.sxwaiagent.manus.model.AgentState;
-import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -25,7 +26,8 @@ import java.util.stream.Collectors;
  * 处理工具调用的基础代理类，具体实现了 think 和 act 方法，可以用作创建实例的父类
  */
 @EqualsAndHashCode(callSuper = true)
-@Data
+@Getter
+@Setter
 @Slf4j
 public class ToolCallAgent extends ReActAgent {
 

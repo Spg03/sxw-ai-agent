@@ -1,10 +1,16 @@
 package com.sxw.sxwaiagent.web.controller;
 
 import com.sxw.sxwaiagent.love.LoveApp;
+import com.sxw.sxwaiagent.infrastructure.skill.SkillRegistry;
+import com.sxw.sxwaiagent.infrastructure.memory.ManusMemoryStore;
+import com.sxw.sxwaiagent.infrastructure.trace.AgentTraceStore;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.util.concurrent.Executor;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -20,8 +26,15 @@ class AiControllerRagFlowTest {
         LoveApp loveApp = mock(LoveApp.class);
         when(loveApp.doChatWithRagFlow("hello", "chat-1")).thenReturn("ragflow answer");
 
-        AiController controller = new AiController();
-        ReflectionTestUtils.setField(controller, "loveApp", loveApp);
+        AiController controller = new AiController(
+                loveApp,
+                new ToolCallback[0],
+                mock(ChatModel.class),
+                mock(Executor.class),
+                mock(SkillRegistry.class),
+                mock(ManusMemoryStore.class),
+                mock(AgentTraceStore.class)
+        );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
         mockMvc.perform(get("/ai/love_app/chat/ragflow/sync")
