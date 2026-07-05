@@ -4,9 +4,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 评测运行
+ * Eval run.
  * <p>
- * 记录一次评测执行的完整信息，包括运行的用例、结果和统计数据。
+ * Records complete information for one eval execution, including run cases, results, and statistics.
  */
 public record EvalRun(
     Long id,
@@ -28,7 +28,7 @@ public record EvalRun(
     String errorMessage
 ) {
     /**
-     * 便捷构造函数：创建 PENDING 状态的运行
+     * Convenience constructor: create run in PENDING status.
      */
     public EvalRun(
         String runId,
@@ -43,21 +43,21 @@ public record EvalRun(
     }
 
     /**
-     * 检查是否可以开始
+     * Check if run can start.
      */
     public boolean canStart() {
         return status == EvalRunStatus.PENDING;
     }
 
     /**
-     * 检查是否已完成
+     * Check if run is completed.
      */
     public boolean isCompleted() {
         return status == EvalRunStatus.COMPLETED || status == EvalRunStatus.FAILED;
     }
 
     /**
-     * 计算通过率
+     * Calculate pass rate.
      */
     public double calculatePassRate() {
         if (totalCases == null || totalCases == 0) {
@@ -68,7 +68,7 @@ public record EvalRun(
     }
 
     /**
-     * 构建摘要文本
+     * Build summary text.
      */
     public String buildSummary() {
         return String.format("[%s] %s - %s (%.1f%% passed, %d/%d cases)",

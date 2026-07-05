@@ -25,8 +25,8 @@ public class WebScrapingTool {
             return ToolSandboxSupport.limitOutput(document.outerHtml(), MAX_OUTPUT_CHARS);
         } catch (IllegalArgumentException e) {
             return "refused: " + e.getMessage();
-        } catch (Exception e) {
-            return "failed: " + e.getMessage();
+        } catch (java.io.IOException e) {
+            return "failed to scrape: " + e.getMessage();
         }
     }
 }

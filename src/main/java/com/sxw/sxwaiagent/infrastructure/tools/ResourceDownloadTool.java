@@ -62,8 +62,8 @@ public class ResourceDownloadTool {
             return ToolSandboxSupport.limitOutput(result, MAX_OUTPUT_CHARS);
         } catch (IllegalArgumentException e) {
             return "refused: " + e.getMessage();
-        } catch (Exception e) {
-            return "failed: " + e.getMessage();
+        } catch (java.io.IOException e) {
+            return "failed to download: " + e.getMessage();
         }
     }
 }

@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * 处理工具调用的基础代理类，具体实现了 think 和 act 方法，可以用作创建实例的父类
+ * Base agent class that handles tool calling, implementing think() and act().
  */
 @EqualsAndHashCode(callSuper = true)
 @Getter
@@ -31,44 +31,44 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ToolCallAgent extends ReActAgent {
 
-    // 可用的工具
+    // Available tools
     private final ToolCallback[] availableTools;
 
-    // 保存工具调用信息的响应结果（要调用那些工具）
+    // Chat response containing tool call decisions (used by act)
     private ChatResponse toolCallChatResponse;
 
-    // 工具调用管理者
+    // Tool execution manager
     private final ToolCallingManager toolCallingManager;
 
-    // 禁用 Spring AI 内置的工具调用机制，自己维护选项和消息上下文
+    // Disable Spring AI built-in tool calling; manage options and message context manually
     private final ChatOptions chatOptions;
 
-    // 最近一次助手输出的纯文本（无工具调用时即为最终答案）
+    // Latest assistant plain-text output (final answer when no tool calls)
     private String lastAssistantText = "";
 
     public ToolCallAgent(ToolCallback[] availableTools) {
         super();
         this.availableTools = availableTools;
         this.toolCallingManager = ToolCallingManager.builder().build();
-        // 禁用 Spring AI 内置的工具调用机制，自己维护选项和消息上下文
+        // Disable Spring AI built-in tool calling; manage options and message context manually
         this.chatOptions = DashScopeChatOptions.builder()
                 .withInternalToolExecutionEnabled(false)
                 .build();
     }
 
     /**
-     * 处理当前状态并决定下一步行动
+     * Process current state and decide next action.
      *
-     * @return 是否需要执行行动
+     * @return true if action is needed, false if done
      */
     @Override
     public boolean think() {
-        // 1、校验提示词，拼接用户提示词
+        // 1. Append next-step prompt to message history
         if (StrUtil.isNotBlank(getNextStepPrompt())) {
             UserMessage userMessage = new UserMessage(getNextStepPrompt());
             getMessageList().add(userMessage);
         }
-        // 2、调用 AI 大模型前，对历史进行安全裁剪，避免 token 爆炸
+        // 2. Trim history to avoid token overflow
         trimHistoryIfNeeded();
         List<Message> messageList = getMessageList();
         Prompt prompt = new Prompt(messageList, this.chatOptions);
@@ -80,90 +80,83 @@ public class ToolCallAgent extends ReActAgent {
                     .call()
                     .chatResponse();
             long thinkLatency = System.currentTimeMillis() - thinkStart;
-            // 记录响应，用于等下 Act
+            // Record response for act() phase
             this.toolCallChatResponse = chatResponse;
-            // 3、解析工具调用结果，获取要调用的工具
-            // 助手消息
+            // 3. Parse tool calls from assistant message
             AssistantMessage assistantMessage = chatResponse.getResult().getOutput();
-            // 获取要调用的工具列表
             List<AssistantMessage.ToolCall> toolCallList = assistantMessage.getToolCalls();
             // 输出提示信息
             String result = assistantMessage.getText();
             traceEvent("think", null, getNextStepPrompt(), result, "ok", thinkLatency);
-            log.info(getName() + "的思考：" + result);
-            log.info(getName() + "选择了 " + toolCallList.size() + " 个工具来使用");
+            log.info(getName() + " thinks: " + result);
+            log.info(getName() + " selected " + toolCallList.size() + " tool(s) to use");
             String toolCallInfo = toolCallList.stream()
-                    .map(toolCall -> String.format("工具名称：%s，参数：%s", toolCall.name(), toolCall.arguments()))
+                    .map(toolCall -> String.format("Tool: %s, Args: %s", toolCall.name(), toolCall.arguments()))
                     .collect(Collectors.joining("\n"));
             log.info(toolCallInfo);
             for (AssistantMessage.ToolCall toolCall : toolCallList) {
                 traceEvent("tool_call", toolCall.name(), toolCall.arguments(), "", "planned", 0);
             }
-            // 如果不需要调用工具，说明助手已经给出最终答案：保存文本并结束循环
+            // No tools needed: save assistant message and finish
             if (toolCallList.isEmpty()) {
-                // 只有不调用工具时，才需要手动记录助手消息
                 getMessageList().add(assistantMessage);
                 this.lastAssistantText = result == null ? "" : result;
                 setState(AgentState.FINISHED);
                 return false;
             } else {
-                // 需要调用工具时，无需记录助手消息，因为调用工具时会自动记录
+                // Tools will be called; no need to record assistant message manually
                 return true;
             }
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             traceEvent("think", null, getNextStepPrompt(), e.getMessage(), "error", 0);
-            log.error(getName() + "的思考过程遇到了问题：" + e.getMessage());
-            getMessageList().add(new AssistantMessage("处理时遇到了错误：" + e.getMessage()));
+            log.error(getName() + " think error: " + e.getMessage());
+            getMessageList().add(new AssistantMessage("Error during processing: " + e.getMessage()));
             return false;
         }
     }
 
     /**
-     * 单步执行：思考 + 行动。
-     * 当思考无需调用工具时，将助手生成的最终文本作为该步结果返回，
-     * 让前端能直接展示自然语言答案，而不是占位符 “思考完成 - 无需行动”。
+     * Single step: think + act.
+     * When no tool calls are needed, returns the assistant's final text
+     * so the frontend can display a natural language answer instead of a placeholder.
      */
     @Override
     public String step() {
         try {
             boolean shouldAct = think();
             if (!shouldAct) {
-                return StrUtil.isNotBlank(lastAssistantText) ? lastAssistantText : "思考完成 - 无需行动";
+                return StrUtil.isNotBlank(lastAssistantText) ? lastAssistantText : "Think done - no action needed";
             }
             return act();
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("step failed", e);
-            return "步骤执行失败：" + e.getMessage();
+            return "Step execution failed: " + e.getMessage();
         }
     }
 
     /**
-     * 执行工具调用并处理结果
+     * Execute tool calls and handle results
      *
      * @return 执行结果
      */
     @Override
     public String act() {
         if (!toolCallChatResponse.hasToolCalls()) {
-            return "没有工具需要调用";
+            return "No tools to execute";
         }
-        // 调用工具
         Prompt prompt = new Prompt(getMessageList(), this.chatOptions);
         long toolStart = System.currentTimeMillis();
         ToolExecutionResult toolExecutionResult = toolCallingManager.executeToolCalls(prompt, toolCallChatResponse);
         long toolLatency = System.currentTimeMillis() - toolStart;
-        // 记录消息上下文，conversationHistory 已经包含了助手消息和工具调用返回的结果
         setMessageList(toolExecutionResult.conversationHistory());
         ToolResponseMessage toolResponseMessage = (ToolResponseMessage) CollUtil.getLast(toolExecutionResult.conversationHistory());
-        // 判断是否调用了终止工具
         boolean terminateToolCalled = toolResponseMessage.getResponses().stream()
                 .anyMatch(response -> response.name().equals("doTerminate"));
         if (terminateToolCalled) {
-            // 任务结束，更改状态
             setState(AgentState.FINISHED);
         }
         String results = toolResponseMessage.getResponses().stream()
-                .map(response -> "工具 " + response.name() + " 返回的结果：" + response.responseData())
+                .map(response -> "Tool " + response.name() + " result: " + response.responseData())
                 .collect(Collectors.joining("\n"));
         toolResponseMessage.getResponses().forEach(response ->
                 traceEvent("tool_result", response.name(), "", response.responseData(), "ok", toolLatency));

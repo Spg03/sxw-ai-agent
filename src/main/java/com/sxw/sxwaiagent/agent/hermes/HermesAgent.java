@@ -34,7 +34,7 @@ public class HermesAgent {
                     .user(message)
                     .call()
                     .entity(HermesReply.class);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             return new HermesReply(
                     "我在这里听你说。刚才这段内容对你来说并不轻松，我们可以先慢一点。",
                     "unknown",

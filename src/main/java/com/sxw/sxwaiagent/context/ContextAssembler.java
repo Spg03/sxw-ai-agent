@@ -11,10 +11,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 上下文组装器
+ * Context assembler.
  * <p>
- * 按分区组装上下文，并应用 Token 预算控制。
- * 组装顺序：
+ * Assembles context by region and applies token budget control.
+ * Assembly order:
  * 1. STATIC: System Rules + Tool Rules + Output Rules
  * 2. DYNAMIC: Profile Config + Memory + Knowledge + Tool Results + History + User Message
  */
@@ -35,17 +35,17 @@ public class ContextAssembler {
     }
     
     /**
-     * 组装完整上下文
+     * Assemble complete context.
      *
-     * @param context       Agent 上下文
-     * @param systemRules   系统规则（静态）
-     * @param toolRules     工具规则（静态）
-     * @param outputRules   输出规则（静态）
-     * @param memoryContent 记忆内容（动态）
-     * @param knowledge     知识库检索结果（动态）
-     * @param toolResults   工具执行结果（动态）
-     * @param history       对话历史（动态）
-     * @return 组装后的消息列表
+     * @param context       Agent context
+     * @param systemRules   System rules (static)
+     * @param toolRules     Tool rules (static)
+     * @param outputRules   Output rules (static)
+     * @param memoryContent Memory content (dynamic)
+     * @param knowledge     Knowledge retrieval results (dynamic)
+     * @param toolResults   Tool execution results (dynamic)
+     * @param history       Conversation history (dynamic)
+     * @return Assembled message list
      */
     public List<Message> assemble(
             AgentContext context,
@@ -61,7 +61,7 @@ public class ContextAssembler {
         List<Message> messages = new ArrayList<>();
         int usedTokens = 0;
         
-        // 1. 静态区域：System + Tool Rules + Output Rules
+        // 1. Static region: System + Tool Rules + Output Rules
         String staticContent = buildStaticContent(systemRules, toolRules, outputRules);
         int staticTokens = tokenCounter.count(staticContent);
         
@@ -75,7 +75,7 @@ public class ContextAssembler {
         usedTokens += staticTokens;
         log.debug("Static region: {} tokens (budget={})", staticTokens, budget.staticBudget());
         
-        // 2. 记忆区域
+        // 2. Memory region
         if (memoryContent != null && !memoryContent.isEmpty()) {
             int memoryTokens = tokenCounter.count(memoryContent);
             if (memoryTokens > budget.memoryBudget()) {
@@ -83,12 +83,12 @@ public class ContextAssembler {
                 memoryContent = compressor.compressMemory(memoryContent, budget.memoryBudget());
                 memoryTokens = tokenCounter.count(memoryContent);
             }
-            messages.add(createUserMessage("[记忆摘要]\n" + memoryContent));
+            messages.add(createUserMessage("[memory summary]\n" + memoryContent));
             usedTokens += memoryTokens;
             log.debug("Memory region: {} tokens (budget={})", memoryTokens, budget.memoryBudget());
         }
         
-        // 3. 知识区域
+        // 3. Knowledge region
         if (knowledge != null && !knowledge.isEmpty()) {
             int knowledgeTokens = tokenCounter.count(knowledge);
             if (knowledgeTokens > budget.knowledgeBudget()) {
@@ -96,12 +96,12 @@ public class ContextAssembler {
                 knowledge = compressor.compressKnowledge(knowledge, budget.knowledgeBudget());
                 knowledgeTokens = tokenCounter.count(knowledge);
             }
-            messages.add(createUserMessage("[知识库证据]\n" + knowledge));
+            messages.add(createUserMessage("[knowledge evidence]\n" + knowledge));
             usedTokens += knowledgeTokens;
             log.debug("Knowledge region: {} tokens (budget={})", knowledgeTokens, budget.knowledgeBudget());
         }
         
-        // 4. 工具结果区域
+        // 4. Tool results region
         if (toolResults != null && !toolResults.isEmpty()) {
             String toolContent = String.join("\n---\n", toolResults);
             int toolTokens = tokenCounter.count(toolContent);
@@ -110,12 +110,12 @@ public class ContextAssembler {
                 toolContent = compressor.compressToolResults(toolContent, budget.toolResultBudget());
                 toolTokens = tokenCounter.count(toolContent);
             }
-            messages.add(createUserMessage("[工具执行结果]\n" + toolContent));
+            messages.add(createUserMessage("[tool execution results]\n" + toolContent));
             usedTokens += toolTokens;
             log.debug("Tool results region: {} tokens (budget={})", toolTokens, budget.toolResultBudget());
         }
         
-        // 5. 对话历史区域
+        // 5. Conversation history region
         if (history != null && !history.isEmpty()) {
             List<Message> compressedHistory = compressor.compressHistory(history, budget.historyBudget(), tokenCounter);
             messages.addAll(compressedHistory);
@@ -126,7 +126,7 @@ public class ContextAssembler {
             log.debug("History region: {} tokens (budget={})", historyTokens, budget.historyBudget());
         }
         
-        // 6. 当前用户消息（不压缩）
+        // 6. Current user message (no compression)
         String userMessage = context.userMessage();
         messages.add(createUserMessage(userMessage));
         int userTokens = tokenCounter.count(userMessage);

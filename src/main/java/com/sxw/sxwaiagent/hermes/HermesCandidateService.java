@@ -8,9 +8,9 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Hermes 候选服务
+ * Hermes candidate service.
  * <p>
- * 提供候选的查询、审核、应用等管理功能。
+ * Provides query, review, apply and management features for candidates.
  */
 @Service
 public class HermesCandidateService {
@@ -29,42 +29,42 @@ public class HermesCandidateService {
     }
     
     /**
-     * 查看所有待审核候选
+     * Find all pending candidates.
      */
     public List<HermesCandidate> findAllPending() {
         return candidateRepository.findAllPending();
     }
     
     /**
-     * 根据状态查看候选
+     * Find candidates by status.
      */
     public List<HermesCandidate> findByStatus(HermesCandidateStatus status) {
         return candidateRepository.findByStatus(status);
     }
     
     /**
-     * 根据类型和状态查看候选
+     * Find candidates by type and status.
      */
     public List<HermesCandidate> findByTypeAndStatus(HermesCandidateType type, HermesCandidateStatus status) {
         return candidateRepository.findByTypeAndStatus(type, status);
     }
     
     /**
-     * 查看指定 Trace 的所有候选
+     * Find all candidates for a given trace.
      */
     public List<HermesCandidate> findByTraceId(String traceId) {
         return candidateRepository.findByTraceId(traceId);
     }
     
     /**
-     * 根据 candidateId 查找
+     * Find by candidateId.
      */
     public Optional<HermesCandidate> findByCandidateId(String candidateId) {
         return candidateRepository.findByCandidateId(candidateId);
     }
     
     /**
-     * 批准候选
+     * Approve candidate.
      */
     public void approve(String candidateId, String reviewedBy) {
         Optional<HermesCandidate> opt = candidateRepository.findByCandidateId(candidateId);

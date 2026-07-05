@@ -3,7 +3,7 @@ package com.sxw.sxwaiagent.common.web;
 import java.util.Locale;
 
 /**
- * 识别“客户端主动断开连接”类异常（SSE/流式场景常见）。
+ * Detect "client abort" exceptions (common in SSE/streaming scenarios).
  */
 public final class ClientAbortDetector {
 

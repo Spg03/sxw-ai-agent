@@ -1,27 +1,27 @@
 package com.sxw.sxwaiagent.manus.model;
 
 /**
- * 代理执行状态的枚举类
+ * Agent execution state enum.
  */
 public enum AgentState {
 
     /**
-     * 空闲状态
+     * Idle state
      */
     IDLE,
 
     /**
-     * 运行中状态
+     * Running state
      */
     RUNNING,
 
     /**
-     * 已完成状态
+     * Finished state
      */
     FINISHED,
 
     /**
-     * 错误状态
+     * Error state
      */
     ERROR
 }

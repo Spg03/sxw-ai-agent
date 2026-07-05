@@ -14,9 +14,9 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Hermes 候选仓储
+ * Hermes candidate repository.
  * <p>
- * 负责 HermesCandidate 的持久化操作。
+ * Handles persistence operations for HermesCandidate.
  */
 @Repository
 public class HermesCandidateRepository {
@@ -30,7 +30,7 @@ public class HermesCandidateRepository {
     }
     
     /**
-     * 保存候选
+     * Save candidate.
      */
     public void save(HermesCandidate candidate) {
         String sql = """
@@ -72,7 +72,7 @@ public class HermesCandidateRepository {
     }
     
     /**
-     * 根据 candidateId 查找
+     * Find by candidateId.
      */
     public Optional<HermesCandidate> findByCandidateId(String candidateId) {
         String sql = "SELECT * FROM ai_hermes_candidate WHERE candidate_id = ?";

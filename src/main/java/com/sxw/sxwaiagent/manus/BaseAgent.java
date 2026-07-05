@@ -22,10 +22,10 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 抽象基础代理类，用于管理代理状态和执行流程。
- * <p>
- * 提供状态转换、内存管理和基于步骤的执行循环的基础功能。
- * 子类必须实现step方法。
+ * Abstract base agent class for managing agent state and execution flow.
+ *
+ * Provides state transitions, memory management, and step-based execution loop.
+ * Subclasses must implement the step method.
  */
 @Getter
 @Setter
@@ -36,7 +36,7 @@ public abstract class BaseAgent {
     private String systemPrompt;
     private String nextStepPrompt;
 
-    /** 代理状态 — volatile 保证多线程（异步 executor + 主线程回调）可见性 */
+    /** Agent state - volatile ensures visibility across threads (async executor + main thread callbacks) */
     private volatile AgentState state = AgentState.IDLE;
 
     private volatile int currentStep = 0;
@@ -44,13 +44,13 @@ public abstract class BaseAgent {
     private ChatClient chatClient;
     private List<Message> messageList = new ArrayList<>();
 
-    /** 会话历史最大消息条数；超过后会安全裁剪最早的成对消息，避免 token 爆炸。 */
+    /** Max messages in conversation history; older paired messages are trimmed to avoid token overflow. */
     private int maxHistoryMessages = 60;
 
-    /** 异步执行器：默认走 ForkJoinPool.commonPool()，生产由 Spring 注入有界命名线程池。 */
+    /** Async executor: defaults to ForkJoinPool.commonPool(), Spring injects bounded named thread pool in production. */
     private Executor executor = ForkJoinPool.commonPool();
 
-    /** 运行结束后的回调钩子，通过 {@link #onFinishedFired} 保证全局只跑一次。 */
+    /** Post-execution callback hook; {@link #onFinishedFired} ensures it runs only once globally. */
     private Runnable onFinished;
     private final AtomicBoolean onFinishedFired = new AtomicBoolean(false);
 
@@ -85,12 +85,12 @@ public abstract class BaseAgent {
         if (!onFinishedFired.compareAndSet(false, true)) return;
         try {
             hook.run();
-        } catch (Exception ex) {
-            log.warn("agent={} onFinished hook failed: {}", name, ex.getMessage());
+        } catch (RuntimeException ex) {
+            log.warn("agent={} onFinished hook failed", name, ex);
         }
     }
 
-    /** 安全裁剪历史，保留首条 SystemMessage 与最近消息，避免破坏 ToolCall↔ToolResponse 配对。 */
+    /** Safely trim history, keeping first SystemMessage and recent messages; avoids breaking ToolCall↔ToolResponse pairs. */
     protected void trimHistoryIfNeeded() {
         int max = maxHistoryMessages;
         if (max <= 0) return;
@@ -112,9 +112,9 @@ public abstract class BaseAgent {
         }
     }
 
-    // ────────────────────── 公共执行循环 ──────────────────────
+    // ────────────────────── Public execution loop ──────────────────────
 
-    /** 校验 + 初始化：返回 null 表示通过，否则返回错误消息。 */
+    /** Validate + initialize: returns null if passed, otherwise returns error message. */
     private String validate(String safeUserPrompt) {
         if (this.state != AgentState.IDLE) {
             return "Cannot run agent from state: " + this.state;
@@ -125,14 +125,14 @@ public abstract class BaseAgent {
         return null;
     }
 
-    /** 初始化运行状态并将用户消息加入上下文。 */
+    /** Initialize run state and add user message to context. */
     private void initRun(String safeUserPrompt) {
         this.state = AgentState.RUNNING;
         traceEvent("run_start", null, safeUserPrompt, "", "ok", 0);
         messageList.add(new UserMessage(safeUserPrompt));
     }
 
-    /** 核心步骤循环，返回执行结果列表。stepConsumer 允许流式路径额外推送中间事件。 */
+    /** Core step loop; returns execution results. stepConsumer allows SSE path to push intermediate events. */
     private List<String> executeLoop(StepConsumer stepConsumer) {
         List<String> results = new ArrayList<>();
         for (int i = 0; i < maxSteps && state != AgentState.FINISHED; i++) {
@@ -159,7 +159,7 @@ public abstract class BaseAgent {
         return results;
     }
 
-    /** 运行结束后的收尾：trace + 回调 + cleanup。 */
+    /** Post-execution cleanup: trace + callback + cleanup. */
     private void finalizeRun() {
         finishTrace(state == AgentState.ERROR ? "error" : "finished");
         invokeOnFinishedSafely();
@@ -171,10 +171,10 @@ public abstract class BaseAgent {
         void accept(String stepResult);
     }
 
-    // ────────────────────── 公共 API ──────────────────────
+    // ────────────────────── Public API ──────────────────────
 
     /**
-     * 同步运行代理。
+     * Run agent synchronously.
      */
     public String run(String userPrompt) {
         String safeUserPrompt = userPrompt == null ? "" : userPrompt;
@@ -184,30 +184,30 @@ public abstract class BaseAgent {
         try {
             List<String> results = executeLoop(null);
             return String.join("\n", results);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             state = AgentState.ERROR;
             traceEvent("error", null, safeUserPrompt, e.getMessage(), "error", 0);
-            log.error("error executing agent", e);
-            return "执行错误" + e.getMessage();
+            log.error("Error executing agent", e);
+            return "Execution error: " + e.getMessage();
         } finally {
             finalizeRun();
         }
     }
 
     /**
-     * 流式运行代理（SSE 输出）。
+     * Run agent with streaming (SSE output).
      */
     public SseEmitter runStream(String userPrompt) {
         String safeUserPrompt = userPrompt == null ? "" : userPrompt;
-        SseEmitter sseEmitter = new SseEmitter(300000L); // 5 分钟超时
+        SseEmitter sseEmitter = new SseEmitter(300000L); // 5 min timeout
 
         CompletableFuture.runAsync(() -> {
             String error = validate(safeUserPrompt);
             if (error != null) {
                 try {
-                    sseEmitter.send("错误：" + error);
+                    sseEmitter.send("Error: " + error);
                     sseEmitter.complete();
-                } catch (Exception e) {
+                } catch (IOException e) {
                     handleSseError(sseEmitter, e);
                 }
                 return;
@@ -217,11 +217,11 @@ public abstract class BaseAgent {
                 executeLoop(stepResult -> {
                     try {
                         sseEmitter.send(SseEmitter.event().name("step").data(stepResult));
-                    } catch (Exception e) {
+                    } catch (IOException e) {
                         throw new SseSendException(e);
                     }
                 });
-                // 发送最终答案
+                // Send final answer
                 String finalAnswer = extractFinalAssistantText();
                 if (StrUtil.isNotBlank(finalAnswer)) {
                     sseEmitter.send(SseEmitter.event().name("final").data(finalAnswer));
@@ -231,16 +231,18 @@ public abstract class BaseAgent {
                 Throwable cause = e.getCause();
                 handleSseDisconnect(sseEmitter,
                         cause instanceof Exception ex ? ex : new RuntimeException(cause));
-            } catch (Exception e) {
+            } catch (IOException e) {
+                handleSseDisconnect(sseEmitter, e);
+            } catch (RuntimeException e) {
                 if (ClientAbortDetector.isClientAbort(e)) {
                     handleSseDisconnect(sseEmitter, e);
                     return;
                 }
                 state = AgentState.ERROR;
                 traceEvent("error", null, safeUserPrompt, e.getMessage(), "error", 0);
-                log.error("error executing agent", e);
+                log.error("Error executing agent", e);
                 try {
-                    sseEmitter.send(SseEmitter.event().name("error").data("执行错误：" + e.getMessage()));
+                    sseEmitter.send(SseEmitter.event().name("error").data("Execution error: " + e.getMessage()));
                     sseEmitter.complete();
                 } catch (IOException ex) {
                     if (ClientAbortDetector.isClientAbort(ex)) {
@@ -273,10 +275,10 @@ public abstract class BaseAgent {
     private void handleSseDisconnect(SseEmitter sseEmitter, Exception e) {
         state = AgentState.FINISHED;
         log.info("agent={} sse client disconnected: {}", name, e.getMessage());
-        try { sseEmitter.complete(); } catch (Exception ignore) { }
+        try { sseEmitter.complete(); } catch (RuntimeException ignore) { }
     }
 
-    private void handleSseError(SseEmitter sseEmitter, Exception e) {
+    private void handleSseError(SseEmitter sseEmitter, IOException e) {
         if (ClientAbortDetector.isClientAbort(e)) {
             handleSseDisconnect(sseEmitter, e);
         } else {
@@ -284,15 +286,15 @@ public abstract class BaseAgent {
         }
     }
 
-    /** 内部异常：包装 SSE send 时的 IOException，便于在 executeLoop 中传播。 */
+    /** Internal exception: wraps IOException from SSE send for propagation in executeLoop. */
     private static class SseSendException extends RuntimeException {
         SseSendException(Throwable cause) { super(cause); }
     }
 
-    /** 定义单个步骤 */
+    /** Define a single step */
     public abstract String step();
 
-    /** 从会话历史中提取最近一条不为空的助手文本。 */
+    /** Extract the latest non-empty assistant text from conversation history. */
     protected String extractFinalAssistantText() {
         for (int i = messageList.size() - 1; i >= 0; i--) {
             Message m = messageList.get(i);
@@ -304,6 +306,6 @@ public abstract class BaseAgent {
         return "";
     }
 
-    /** 清理资源，子类可重写。 */
+    /** Cleanup resources; subclasses may override. */
     protected void cleanup() { }
 }

@@ -6,15 +6,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * 追踪记录器
+ * Trace recorder.
  * <p>
- * 负责记录 Agent 执行过程中的各种追踪信息：
- * - 模型调用
- * - 工具调用
- * - 上下文变化
- * - 知识检索命中
+ * Records various trace information during Agent execution:
+ * - Model calls
+ * - Tool calls
+ * - Context changes
+ * - Knowledge retrieval hits
  * <p>
- * P2 阶段使用 AgentTraceStore，后续升级到独立的 Trace 数据库。
+ * P2 phase uses AgentTraceStore, later upgrade to dedicated Trace database.
  */
 @Component
 public class TraceRecorder {
@@ -28,7 +28,7 @@ public class TraceRecorder {
     }
     
     /**
-     * 记录工具调用
+     * Record tool call.
      */
     public void recordToolCall(
             String requestId,
@@ -46,7 +46,7 @@ public class TraceRecorder {
         }
         
         try {
-            // 截断过长的参数和结果
+            // Truncate long arguments and results
             String inputSummary = truncate(arguments, 200);
             String outputSummary = truncate(result, 200);
             
@@ -62,13 +62,13 @@ public class TraceRecorder {
             );
             
             log.debug("[{}] Recorded tool call: {} (turn {}, status={})", requestId, toolName, turn, status);
-        } catch (Exception e) {
-            log.error("[{}] Failed to record tool call trace: {}", requestId, e.getMessage(), e);
+        } catch (RuntimeException e) {
+            log.error("[{}] Failed to record tool call trace", requestId, e);
         }
     }
     
     /**
-     * 记录模型调用
+     * Record model call.
      */
     public void recordModelCall(
             String requestId,
@@ -97,13 +97,13 @@ public class TraceRecorder {
                     "success",
                     latencyMs
             );
-        } catch (Exception e) {
-            log.error("[{}] Failed to record model call trace: {}", requestId, e.getMessage(), e);
+        } catch (RuntimeException e) {
+            log.error("[{}] Failed to record model call trace", requestId, e);
         }
     }
     
     /**
-     * 记录知识检索命中
+     * Record knowledge retrieval hit.
      */
     public void recordKnowledgeHit(
             String requestId,
@@ -130,13 +130,13 @@ public class TraceRecorder {
                     "success",
                     latencyMs
             );
-        } catch (Exception e) {
-            log.error("[{}] Failed to record knowledge hit trace: {}", requestId, e.getMessage(), e);
+        } catch (RuntimeException e) {
+            log.error("[{}] Failed to record knowledge hit trace", requestId, e);
         }
     }
     
     /**
-     * 截断字符串
+     * Truncate string.
      */
     private String truncate(String text, int maxLength) {
         if (text == null) {

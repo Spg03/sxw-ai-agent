@@ -9,9 +9,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 上下文项仓储
+ * Context item repository.
  * <p>
- * 持久化上下文项到 ai_context_item 表，用于追踪和分析。
+ * Persists context items to ai_context_item table for tracking and analysis.
  */
 @Repository
 public class ContextItemRepository {
@@ -25,7 +25,7 @@ public class ContextItemRepository {
     }
 
     /**
-     * 保存上下文项
+     * Save context item.
      */
     public void save(ContextItem item) {
         String sql = """
@@ -51,14 +51,14 @@ public class ContextItemRepository {
     }
 
     /**
-     * 批量保存上下文项
+     * Batch save context items.
      */
     public void saveAll(List<ContextItem> items) {
         items.forEach(this::save);
     }
 
     /**
-     * 按 requestId 查询上下文项
+     * Query context items by requestId.
      */
     public List<ContextItem> findByRequestId(String requestId) {
         String sql = """
@@ -84,7 +84,7 @@ public class ContextItemRepository {
     }
 
     /**
-     * 按 traceId 查询上下文项
+     * Query context items by traceId.
      */
     public List<ContextItem> findByTraceId(String traceId) {
         String sql = """
@@ -110,7 +110,7 @@ public class ContextItemRepository {
     }
 
     /**
-     * 清理指定 requestId 的上下文项
+     * Delete context items by requestId.
      */
     public void deleteByRequestId(String requestId) {
         String sql = "DELETE FROM ai_context_item WHERE request_id = ?";

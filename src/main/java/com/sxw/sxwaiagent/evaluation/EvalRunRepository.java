@@ -16,7 +16,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
- * 评测运行仓储
+ * Eval run repository.
  */
 @Repository
 public class EvalRunRepository {

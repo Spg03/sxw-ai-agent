@@ -7,20 +7,20 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
 
 /**
- * AI 超级智能体（拥有自主规划能力）。
- * <p>
- * 注意：该类持有会话级可变状态（messageList/state/currentStep 等），<b>不是线程安全的</b>。
- * 每次请求必须 {@code new} 一个新实例（参见 {@code AiController#doChatWithManus}），
- * 不要将其注册为 Spring 单例 Bean 被并发共享。
+ * AI super agent with autonomous planning capabilities.
+ *
+ * Note: holds session-level mutable state (messageList/state/currentStep etc.); <b>NOT thread-safe</b>.
+ * Each request must {@code new} an instance (see {@code AiController#doChatWithManus});
+ * do NOT register as Spring singleton bean for concurrent sharing.
  */
 public class SxwManus extends ToolCallAgent {
 
     public SxwManus(ToolCallback[] allTools, ChatModel dashscopeChatModel, SkillRegistry skillRegistry) {
         super(allTools);
         this.setName("sxwManus");
-        // 基础 system prompt + Agent Skills 清单（progressive disclosure：只放摘要，正文按需通过 loadSkill 工具拉取）
+        // Base system prompt + Agent Skills manifest (progressive disclosure: summary only, full content loaded via loadSkill tool on demand)
         String baseSystemPrompt = """
-                You are SxwManus, a concise and pragmatic AI assistant. 默认使用中文回答。
+                You are SxwManus, a concise and pragmatic AI assistant. Default response language: Chinese.
 
                 Response policy (must follow):
                 1. For greetings, small talk, opinions, or general knowledge questions, answer DIRECTLY in 1-3 short sentences. Do NOT call any tool. Do NOT call doTerminate either — simply produce the final assistant text and stop.
@@ -43,7 +43,7 @@ public class SxwManus extends ToolCallAgent {
                 """;
         this.setNextStepPrompt(NEXT_STEP_PROMPT);
         this.setMaxSteps(8);
-        // 初始化 AI 对话客户端
+        // Initialize AI chat client
         ChatClient chatClient = ChatClient.builder(dashscopeChatModel)
                 .defaultAdvisors(new MyLoggerAdvisor())
                 .build();

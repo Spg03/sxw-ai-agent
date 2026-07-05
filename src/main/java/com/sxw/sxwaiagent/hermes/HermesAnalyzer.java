@@ -12,18 +12,18 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * Hermes 分析器
+ * Hermes analyzer.
  * <p>
- * 异步分析 Agent 运行轨迹，生成改进候选。
- * 这是 Hermes 复盘系统的核心组件。
+ * Asynchronously analyzes Agent run traces and generates improvement candidates.
+ * This is the core component of the Hermes review system.
  * <p>
- * 分析维度：
- * - 成功模式：哪些工具组合效果好
- * - 失败模式：哪些工具调用失败
- * - 用户偏好：用户喜欢什么风格的回答
- * - 知识缺口：哪些检索没有命中
- * - Prompt 效果：哪些 Prompt 版本效果好
- * - 效率问题：哪些调用链过长
+ * Analysis dimensions:
+ * - Success patterns: which tool combinations work well
+ * - Failure patterns: which tool calls failed
+ * - User preferences: what response style users prefer
+ * - Knowledge gaps: which retrievals did not hit
+ * - Prompt effectiveness: which prompt versions perform better
+ * - Efficiency issues: which call chains are too long
  */
 @Component
 public class HermesAnalyzer {

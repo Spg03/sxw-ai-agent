@@ -13,9 +13,9 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * Hermes 应用器
+ * Hermes applier.
  * <p>
- * 将审核通过的候选应用到对应的模块（Memory、Knowledge、Eval 等）。
+ * Applies approved candidates to corresponding modules (Memory, Knowledge, Eval, etc.).
  */
 @Component
 public class HermesApplier {

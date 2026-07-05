@@ -47,7 +47,7 @@ spring:
 server:
   port: ${SERVER_PORT:8123}
   servlet:
-    context-path: /api
+    context-path: /api/v1
 # springdoc-openapi config
 springdoc:
   swagger-ui:

@@ -10,9 +10,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 评测服务
+ * Eval service.
  * <p>
- * 提供评测用例管理、评测运行、结果查询等功能。
+ * Provides eval case management, eval runs, result queries and other features.
  */
 @Service
 public class EvalService {

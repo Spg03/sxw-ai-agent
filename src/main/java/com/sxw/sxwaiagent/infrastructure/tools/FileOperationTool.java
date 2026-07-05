@@ -30,8 +30,8 @@ public class FileOperationTool {
             return FileUtil.readUtf8String(target.toString());
         } catch (IllegalArgumentException e) {
             return "refused: " + e.getMessage();
-        } catch (Exception e) {
-            return "Error reading file: " + e.getMessage();
+        } catch (RuntimeException e) {
+            return "failed to read file: " + e.getMessage();
         }
     }
 
@@ -46,11 +46,11 @@ public class FileOperationTool {
             }
             FileUtil.mkdir(FILE_DIR);
             FileUtil.writeUtf8String(safe, target.toString());
-            return "File written successfully to: " + target;
+            return "file written successfully: " + target;
         } catch (IllegalArgumentException e) {
             return "refused: " + e.getMessage();
-        } catch (Exception e) {
-            return "Error writing to file: " + e.getMessage();
+        } catch (RuntimeException e) {
+            return "failed to write file: " + e.getMessage();
         }
     }
 

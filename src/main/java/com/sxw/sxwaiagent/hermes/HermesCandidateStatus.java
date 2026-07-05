@@ -1,31 +1,31 @@
 package com.sxw.sxwaiagent.hermes;
 
 /**
- * Hermes 候选状态
+ * Hermes candidate status.
  */
 public enum HermesCandidateStatus {
     /**
-     * 待审核
+     * Pending review.
      */
     PENDING,
     
     /**
-     * 已批准
+     * Approved.
      */
     APPROVED,
     
     /**
-     * 已拒绝
+     * Rejected.
      */
     REJECTED,
     
     /**
-     * 已应用
+     * Applied.
      */
     APPLIED,
     
     /**
-     * 应用失败
+     * Application failed.
      */
     FAILED
 }

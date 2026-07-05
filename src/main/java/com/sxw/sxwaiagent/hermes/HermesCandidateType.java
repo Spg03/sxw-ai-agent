@@ -1,41 +1,41 @@
 package com.sxw.sxwaiagent.hermes;
 
 /**
- * Hermes 候选类型
+ * Hermes candidate type.
  */
 public enum HermesCandidateType {
     /**
-     * 记忆候选（用户偏好、反馈规则）
+     * Memory candidate (user preferences, feedback rules).
      */
     MEMORY,
     
     /**
-     * 知识候选（缺失文档、FAQ）
+     * Knowledge candidate (missing docs, FAQ).
      */
     KNOWLEDGE,
     
     /**
-     * 评测用例（输入输出对）
+     * Eval case (input-output pairs).
      */
     EVAL_CASE,
     
     /**
-     * Agent 规则（行为约束）
+     * Agent rule (behavior constraints).
      */
     AGENT_RULE,
     
     /**
-     * Prompt 优化建议
+     * Prompt improvement suggestion.
      */
     PROMPT_IMPROVEMENT,
     
     /**
-     * 工具改进建议
+     * Tool improvement suggestion.
      */
     TOOL_IMPROVEMENT,
     
     /**
-     * 文档更新建议
+     * Documentation update suggestion.
      */
     DOC_UPDATE
 }

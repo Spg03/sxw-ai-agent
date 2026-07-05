@@ -59,7 +59,7 @@ public class WebSearchTool {
             }).collect(Collectors.joining(","));
             return ToolSandboxSupport.limitOutput(result, MAX_OUTPUT_CHARS);
         } catch (Exception e) {
-            return "Error searching Baidu: " + e.getMessage();
+            return "failed to search: " + e.getMessage();
         }
     }
 }

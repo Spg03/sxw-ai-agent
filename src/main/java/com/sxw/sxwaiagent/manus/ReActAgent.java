@@ -6,8 +6,9 @@ import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * ReAct (Reasoning and Acting) 模式的代理抽象类
- * 实现了思考-行动的循环模式
+ * Abstract agent class implementing ReAct (Reasoning and Acting) pattern.
+ *
+ * Implements think-act loop pattern.
  */
 @EqualsAndHashCode(callSuper = true)
 @Getter
@@ -16,38 +17,37 @@ import lombok.extern.slf4j.Slf4j;
 public abstract class ReActAgent extends BaseAgent {
 
     /**
-     * 处理当前状态并决定下一步行动
+     * Process current state and decide next action.
      *
-     * @return 是否需要执行行动，true表示需要执行，false表示不需要执行
+     * @return true if action is needed, false if done
      */
     public abstract boolean think();
 
     /**
-     * 执行决定的行动
+     * Execute the decided action.
      *
-     * @return 行动执行结果
+     * @return Action execution result
      */
     public abstract String act();
 
     /**
-     * 执行单个步骤：思考和行动
+     * Execute single step: think and act.
      *
-     * @return 步骤执行结果
+     * @return Step execution result
      */
     @Override
     public String step() {
         try {
-            // 先思考
+            // Think first
             boolean shouldAct = think();
             if (!shouldAct) {
-                return "思考完成 - 无需行动";
+                return "Think done - no action needed";
             }
-            // 再行动
+            // Then act
             return act();
-        } catch (Exception e) {
-            // 记录异常日志
+        } catch (RuntimeException e) {
             log.error("step failed", e);
-            return "步骤执行失败：" + e.getMessage();
+            return "Step execution failed: " + e.getMessage();
         }
     }
 

@@ -5,10 +5,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Token 计数器
+ * Token counter.
  * <p>
- * 估算文本的 Token 数量。当前使用简单的字符数 / 4 近似算法，
- * 后续可替换为 tiktoken 或模型实际 tokenizer。
+ * Estimate token count for text. Currently uses a simple chars/4 approximation;
+ * can be replaced with tiktoken or the model's actual tokenizer later.
  */
 @Component
 public class TokenCounter {
@@ -17,7 +17,7 @@ public class TokenCounter {
     private static final double CHARS_PER_TOKEN = 4.0;
 
     /**
-     * 估算 Token 数量
+     * Estimate token count.
      */
     public int count(String text) {
         if (text == null || text.isEmpty()) {
@@ -27,7 +27,7 @@ public class TokenCounter {
     }
 
     /**
-     * 按 Token 预算截断文本
+     * Truncate text by token budget.
      */
     public String truncate(String text, int maxTokens) {
         if (text == null) return null;
@@ -39,6 +39,6 @@ public class TokenCounter {
         if (maxChars >= text.length()) {
             return text;
         }
-        return text.substring(0, maxChars) + "\n...[已截断，原长度: " + text.length() + " 字符]";
+        return text.substring(0, maxChars) + "\n...[truncated, original length: " + text.length() + " chars]";
     }
 }

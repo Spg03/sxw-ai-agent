@@ -22,8 +22,8 @@ final class ToolSandboxSupport {
         this.baseDir = Path.of(FileConstant.FILE_SAVE_DIR, subDir).toAbsolutePath().normalize();
         try {
             Files.createDirectories(baseDir);
-        } catch (Exception e) {
-            throw new IllegalStateException("init sandbox dir failed: " + baseDir, e);
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("failed to init sandbox directory: " + baseDir, e);
         }
     }
 
@@ -50,8 +50,8 @@ final class ToolSandboxSupport {
         java.net.URI uri;
         try {
             uri = java.net.URI.create(trimmed);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("invalid url: " + rawUrl);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("invalid url: " + rawUrl, e);
         }
         String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
         if (!"http".equals(scheme) && !"https".equals(scheme)) {

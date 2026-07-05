@@ -9,12 +9,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 上下文压缩器
+ * Context compressor.
  * <p>
- * 三层压缩策略：
- * 1. 大 Tool Result 压缩（>500 字符只保留 preview）
- * 2. 旧历史消息压缩（超 10 轮压缩成 summary）
- * 3. 可重新获取的结果只保留引用
+ * Three-layer compression strategy:
+ * 1. Large Tool Result compression (>500 chars keep only preview)
+ * 2. Old history compression (beyond 10 turns compress to summary)
+ * 3. Re-fetchable results keep only reference
  */
 @Component
 public class ContextCompressor {
@@ -24,7 +24,7 @@ public class ContextCompressor {
     private static final int HISTORY_SUMMARY_THRESHOLD = 10;
 
     /**
-     * 压缩静态内容（不降级，仅截断）
+     * Compress static content (no degradation, truncation only).
      */
     public String compressStatic(String content, int maxTokens) {
         log.debug("Compressing static content to {} tokens", maxTokens);
@@ -32,7 +32,7 @@ public class ContextCompressor {
     }
 
     /**
-     * 压缩记忆内容
+     * Compress memory content.
      */
     public String compressMemory(String content, int maxTokens) {
         log.debug("Compressing memory to {} tokens", maxTokens);
@@ -40,11 +40,11 @@ public class ContextCompressor {
     }
 
     /**
-     * 压缩知识库内容（减少 topK）
+     * Compress knowledge content (reduce topK).
      */
     public String compressKnowledge(String content, int maxTokens) {
         log.debug("Compressing knowledge to {} tokens", maxTokens);
-        // 简单策略：按段落分割，逐个添加直到超预算
+        // Simple strategy: split by paragraphs, add one by one until budget exceeded
         String[] chunks = content.split("\n\n");
         StringBuilder sb = new StringBuilder();
         int currentTokens = 0;
@@ -53,7 +53,7 @@ public class ContextCompressor {
         for (String chunk : chunks) {
             int chunkTokens = (int) Math.ceil(chunk.length() / (double) charsPerToken);
             if (currentTokens + chunkTokens > maxTokens) {
-                sb.append("\n...[知识库内容已截断，剩余 ").append(chunks.length - sb.toString().split("\n\n").length).append(" 条未展示]");
+                sb.append("\n...[knowledge truncated, ").append(chunks.length - sb.toString().split("\n\n").length).append(" items omitted]");
                 break;
             }
             sb.append(chunk).append("\n\n");
@@ -63,29 +63,29 @@ public class ContextCompressor {
     }
 
     /**
-     * 压缩工具结果（第一层压缩）
+     * Compress tool results (first-layer compression).
      */
     public String compressToolResults(String content, int maxTokens) {
         log.debug("Compressing tool results to {} tokens", maxTokens);
 
-        // 如果单个结果超过 500 字符，只保留 preview
+        // If single result exceeds 500 chars, keep only preview
         if (content.length() > 500) {
             String preview = content.substring(0, Math.min(TOOL_RESULT_PREVIEW_LIMIT, content.length()));
-            content = preview + "\n...[工具结果已压缩，原长度: " + content.length() + " 字符]";
+            content = preview + "\n...[tool result compressed, original length: " + content.length() + " chars]";
         }
 
         return truncateByTokens(content, maxTokens);
     }
 
     /**
-     * 压缩对话历史（第二层压缩）
+     * Compress conversation history (second-layer compression).
      */
     public List<Message> compressHistory(List<Message> history, int maxTokens, TokenCounter tokenCounter) {
         if (history == null || history.isEmpty()) {
             return List.of();
         }
 
-        // 计算总 token
+        // Calculate total tokens
         int totalTokens = history.stream()
                 .mapToInt(msg -> tokenCounter.count(msg.getText()))
                 .sum();
@@ -94,20 +94,20 @@ public class ContextCompressor {
             return history;
         }
 
-        // 超预算：保留最近的 N 轮，旧的压缩成 summary
+        // Over budget: keep recent N turns, compress old ones into summary
         List<Message> compressed = new ArrayList<>();
 
         if (history.size() > HISTORY_SUMMARY_THRESHOLD) {
-            // 压缩旧消息
+            // Compress old messages
             List<Message> oldMessages = history.subList(0, history.size() - HISTORY_SUMMARY_THRESHOLD);
             String summary = buildHistorySummary(oldMessages);
-            compressed.add(new org.springframework.ai.chat.messages.UserMessage("[历史摘要]\n" + summary));
+            compressed.add(new org.springframework.ai.chat.messages.UserMessage("[history summary]\n" + summary));
 
-            // 保留最近消息
+            // Keep recent messages
             List<Message> recentMessages = history.subList(history.size() - HISTORY_SUMMARY_THRESHOLD, history.size());
             compressed.addAll(recentMessages);
         } else {
-            // 从最早的消息开始丢弃，直到不超预算
+            // Discard from oldest until within budget
             int idx = 0;
             while (idx < history.size()) {
                 List<Message> remaining = history.subList(idx, history.size());
@@ -127,16 +127,16 @@ public class ContextCompressor {
     }
 
     /**
-     * 构建历史消息摘要
+     * Build history summary.
      */
     private String buildHistorySummary(List<Message> oldMessages) {
-        // 简单策略：提取关键词作为主题摘要
+        // Simple strategy: extract keywords as topic summary
         StringBuilder sb = new StringBuilder();
-        sb.append("前 ").append(oldMessages.size()).append(" 轮对话讨论了以下内容：\n");
+        sb.append("First ").append(oldMessages.size()).append(" turns discussed the following:\n");
 
         int count = 0;
         for (Message msg : oldMessages) {
-            if (count >= 5) break; // 最多提取 5 条
+            if (count >= 5) break; // Extract at most 5 items
             String text = msg.getText();
             if (text != null && !text.isEmpty()) {
                 String preview = text.length() > 100 ? text.substring(0, 100) + "..." : text;
@@ -149,7 +149,7 @@ public class ContextCompressor {
     }
 
     /**
-     * 按 Token 数截断文本
+     * Truncate text by token count.
      */
     private String truncateByTokens(String text, int maxTokens) {
         if (text == null) return null;
@@ -158,6 +158,6 @@ public class ContextCompressor {
         if (text.length() <= maxChars) {
             return text;
         }
-        return text.substring(0, maxChars) + "\n...[已截断，原长度: " + text.length() + " 字符]";
+        return text.substring(0, maxChars) + "\n...[truncated, original length: " + text.length() + " chars]";
     }
 }

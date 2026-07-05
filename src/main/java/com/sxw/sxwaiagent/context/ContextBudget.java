@@ -1,33 +1,33 @@
 package com.sxw.sxwaiagent.context;
 
 /**
- * 上下文 Token 预算配置
+ * Context Token budget configuration.
  * <p>
- * 定义各区域的 Token 预算分配比例和具体数值。
- * 默认以 qwen-plus 8K 为例：maxInput=8192, reservedOutput=2048, available=6144
+ * Defines token budget allocation ratios and values for each region.
+ * Default uses qwen-plus 8K as example: maxInput=8192, reservedOutput=2048, available=6144
  */
 public record ContextBudget(
-        int maxInputTokens,       // 模型最大输入 token
-        int reservedOutputTokens, // 预留输出 token
-        int availableTokens,      // 可用 token = maxInput - reservedOutput
+        int maxInputTokens,       // Model max input tokens
+        int reservedOutputTokens, // Reserved output tokens
+        int availableTokens,      // Available tokens = maxInput - reservedOutput
         
-        // 各区域预算分配
-        int staticBudget,         // 静态区域：30%
-        int memoryBudget,         // 记忆区域：15%
-        int knowledgeBudget,      // 知识区域：20%
-        int toolResultBudget,     // 工具结果：20%
-        int historyBudget         // 对话历史：15%
+        // Region budget allocations
+        int staticBudget,         // Static region: 30%
+        int memoryBudget,         // Memory region: 15%
+        int knowledgeBudget,      // Knowledge region: 20%
+        int toolResultBudget,     // Tool results: 20%
+        int historyBudget         // Conversation history: 15%
 ) {
     
     /**
-     * 默认预算（qwen-plus 8K）
+     * Default budget (qwen-plus 8K).
      */
     public static ContextBudget defaultBudget() {
         return of(8192, 2048);
     }
     
     /**
-     * 自定义预算
+     * Custom budget.
      */
     public static ContextBudget of(int maxInputTokens, int reservedOutputTokens) {
         int available = maxInputTokens - reservedOutputTokens;
@@ -36,23 +36,23 @@ public record ContextBudget(
                 maxInputTokens,
                 reservedOutputTokens,
                 available,
-                (int) (available * 0.30),  // 静态 30%
-                (int) (available * 0.15),  // 记忆 15%
-                (int) (available * 0.20),  // 知识 20%
-                (int) (available * 0.20),  // 工具 20%
-                (int) (available * 0.15)   // 历史 15%
+                (int) (available * 0.30),  // Static 30%
+                (int) (available * 0.15),  // Memory 15%
+                (int) (available * 0.20),  // Knowledge 20%
+                (int) (available * 0.20),  // Tool 20%
+                (int) (available * 0.15)   // History 15%
         );
     }
     
     /**
-     * 检查是否超预算
+     * Check if over budget.
      */
     public boolean isOverBudget(int currentTokens) {
         return currentTokens > availableTokens;
     }
     
     /**
-     * 获取剩余可用 token
+     * Get remaining available tokens.
      */
     public int remainingTokens(int usedTokens) {
         return Math.max(0, availableTokens - usedTokens);

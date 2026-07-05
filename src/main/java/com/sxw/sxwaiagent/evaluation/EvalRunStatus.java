@@ -1,31 +1,31 @@
 package com.sxw.sxwaiagent.evaluation;
 
 /**
- * 评测运行状态
+ * Eval run status.
  */
 public enum EvalRunStatus {
     /**
-     * 等待执行
+     * Waiting for execution.
      */
     PENDING,
     
     /**
-     * 执行中
+     * Running.
      */
     RUNNING,
     
     /**
-     * 已完成
+     * Completed.
      */
     COMPLETED,
     
     /**
-     * 已失败
+     * Failed.
      */
     FAILED,
     
     /**
-     * 已取消
+     * Cancelled.
      */
     CANCELLED
 }

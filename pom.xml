@@ -13,18 +13,28 @@
     <version>0.0.1-SNAPSHOT</version>
     <name>sxw-ai-agent</name>
     <description>sxw-ai-agent</description>
-    <url/>
+    <url>https://github.com/Spg03/sxw-ai-agent</url>
     <licenses>
-        <license/>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+            <distribution>repo</distribution>
+        </license>
     </licenses>
     <developers>
-        <developer/>
+        <developer>
+            <id>Spg03</id>
+            <name>SXW CDC Team</name>
+            <email>spg@sxw-cdc.com</email>
+            <organization>SXW CDC</organization>
+            <organizationUrl>https://gitee.com/sxw-cdc</organizationUrl>
+        </developer>
     </developers>
     <scm>
-        <connection/>
-        <developerConnection/>
-        <tag/>
-        <url/>
+        <connection>scm:git:https://github.com/Spg03/sxw-ai-agent.git</connection>
+        <developerConnection>scm:git:git@github.com:Spg03/sxw-ai-agent.git</developerConnection>
+        <tag>HEAD</tag>
+        <url>https://github.com/Spg03/sxw-ai-agent</url>
     </scm>
     <properties>
         <java.version>21</java.version>
@@ -120,14 +130,6 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-mysql</artifactId>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>
@@ -259,7 +261,6 @@
                         <spring.datasource.username>sa</spring.datasource.username>
                         <spring.datasource.password></spring.datasource.password>
                         <spring.jpa.hibernate.ddl-auto>create-drop</spring.jpa.hibernate.ddl-auto>
-                        <spring.flyway.enabled>false</spring.flyway.enabled>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

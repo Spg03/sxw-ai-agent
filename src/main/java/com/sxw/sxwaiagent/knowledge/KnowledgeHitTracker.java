@@ -51,8 +51,8 @@ public class KnowledgeHitTracker {
             log.debug("Tracked {} knowledge hits for requestId={}, turn={}", 
                 result.size(), requestId, turn);
                 
-        } catch (Exception e) {
-            log.warn("Failed to track knowledge hits: {}", e.getMessage());
+        } catch (RuntimeException e) {
+            log.warn("Failed to track knowledge hits", e);
         }
     }
     

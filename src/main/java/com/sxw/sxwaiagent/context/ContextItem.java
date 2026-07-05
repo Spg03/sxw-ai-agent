@@ -3,10 +3,10 @@ package com.sxw.sxwaiagent.context;
 import java.time.LocalDateTime;
 
 /**
- * 上下文项记录
+ * Context item record.
  * <p>
- * 记录每次模型调用时各区域的上下文内容，用于追踪和分析。
- * 对应数据库表 ai_context_item。
+ * Records context content for each region during model calls, used for tracking and analysis.
+ * Maps to database table ai_context_item.
  */
 public record ContextItem(
         Long id,
@@ -22,14 +22,14 @@ public record ContextItem(
 ) {
 
     public enum Section {
-        STATIC_RULES,      // 系统规则 + 工具规则 + 输出规则
-        PROFILE_CONFIG,    // Profile 配置
-        MEMORY_INDEX,      // 记忆摘要列表
-        MEMORY_DETAIL,     // 记忆详情
-        KNOWLEDGE,         // 知识库检索结果
-        TOOL_RESULT,       // 工具执行结果
-        HISTORY,           // 对话历史
-        USER_MESSAGE       // 用户消息
+        STATIC_RULES,      // System rules + Tool rules + Output rules
+        PROFILE_CONFIG,    // Profile configuration
+        MEMORY_INDEX,      // Memory summary list
+        MEMORY_DETAIL,     // Memory details
+        KNOWLEDGE,         // Knowledge retrieval results
+        TOOL_RESULT,       // Tool execution results
+        HISTORY,           // Conversation history
+        USER_MESSAGE       // User message
     }
 
     public static ContextItem of(

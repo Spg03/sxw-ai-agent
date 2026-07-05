@@ -32,7 +32,7 @@ spring:
 server:
   port: ${SERVER_PORT:8123}
   servlet:
-    context-path: /api
+    context-path: /api/v1
   # 生产环境优雅停机，留 30s 处理在飞请求
   shutdown: graceful
   tomcat:
