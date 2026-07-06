@@ -4,130 +4,100 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
-/**
- * Hermes candidate service.
- * <p>
- * Provides query, review, apply and management features for candidates.
- */
 @Service
 public class HermesCandidateService {
     
     private static final Logger log = LoggerFactory.getLogger(HermesCandidateService.class);
     
-    private final HermesCandidateRepository candidateRepository;
-    private final HermesApplier hermesApplier;
+    private final HermesCandidateRepository repository;
     
-    public HermesCandidateService(
-        HermesCandidateRepository candidateRepository,
-        HermesApplier hermesApplier
+    public HermesCandidateService(HermesCandidateRepository repository) {
+        this.repository = repository;
+    }
+    
+    public HermesCandidate createCandidate(
+        String runId,
+        String chatId,
+        CandidateType type,
+        String title,
+        String content,
+        String metadata
     ) {
-        this.candidateRepository = candidateRepository;
-        this.hermesApplier = hermesApplier;
+        HermesCandidate candidate = new HermesCandidate(
+            UUID.randomUUID().toString(),
+            runId,
+            chatId,
+            type,
+            title,
+            content,
+            metadata,
+            HermesCandidate.CandidateStatus.PENDING,
+            null,
+            Instant.now(),
+            null
+        );
+        
+        repository.save(candidate);
+        log.info("Created Hermes candidate: {} ({}) for run {}", title, type, runId);
+        return candidate;
     }
     
-    /**
-     * Find all pending candidates.
-     */
-    public List<HermesCandidate> findAllPending() {
-        return candidateRepository.findAllPending();
+    public Optional<HermesCandidate> getCandidate(String candidateId) {
+        return repository.findById(candidateId);
     }
     
-    /**
-     * Find candidates by status.
-     */
-    public List<HermesCandidate> findByStatus(HermesCandidateStatus status) {
-        return candidateRepository.findByStatus(status);
+    public List<HermesCandidate> getPendingCandidates() {
+        return repository.findByStatus(HermesCandidate.CandidateStatus.PENDING);
     }
     
-    /**
-     * Find candidates by type and status.
-     */
-    public List<HermesCandidate> findByTypeAndStatus(HermesCandidateType type, HermesCandidateStatus status) {
-        return candidateRepository.findByTypeAndStatus(type, status);
-    }
-    
-    /**
-     * Find all candidates for a given trace.
-     */
-    public List<HermesCandidate> findByTraceId(String traceId) {
-        return candidateRepository.findByTraceId(traceId);
-    }
-    
-    /**
-     * Find by candidateId.
-     */
-    public Optional<HermesCandidate> findByCandidateId(String candidateId) {
-        return candidateRepository.findByCandidateId(candidateId);
-    }
-    
-    /**
-     * Approve candidate.
-     */
-    public void approve(String candidateId, String reviewedBy) {
-        Optional<HermesCandidate> opt = candidateRepository.findByCandidateId(candidateId);
-        if (opt.isEmpty()) {
-            throw new IllegalArgumentException("Candidate not found: " + candidateId);
+    public boolean approveCandidate(String candidateId, String reviewedBy) {
+        Optional<HermesCandidate> candidateOpt = repository.findById(candidateId);
+        
+        if (candidateOpt.isEmpty()) {
+            log.warn("Candidate not found: {}", candidateId);
+            return false;
         }
         
-        HermesCandidate candidate = opt.get();
-        if (!candidate.canReview()) {
-            throw new IllegalStateException("Candidate cannot be reviewed: " + candidate.status());
+        HermesCandidate candidate = candidateOpt.get();
+        if (candidate.status() != HermesCandidate.CandidateStatus.PENDING) {
+            log.warn("Candidate {} is not in PENDING status (current: {})", candidateId, candidate.status());
+            return false;
         }
         
-        candidateRepository.updateStatus(candidateId, HermesCandidateStatus.APPROVED, reviewedBy);
-        log.info("Candidate approved: {} by {}", candidateId, reviewedBy);
+        repository.updateStatus(candidateId, HermesCandidate.CandidateStatus.APPROVED, reviewedBy);
+        log.info("Approved candidate {} by {}", candidateId, reviewedBy);
+        
+        // TODO: Apply approved candidate to appropriate system
+        // - MEMORY -> MemoryService
+        // - KNOWLEDGE -> KnowledgeService
+        // - EVAL_CASE -> EvalCaseService
+        // - PROMPT_HINT -> PromptService
+        // - TOOL_PATTERN -> ToolRegistry
+        
+        return true;
     }
     
-    /**
-     * 拒绝候选
-     */
-    public void reject(String candidateId, String reviewedBy) {
-        Optional<HermesCandidate> opt = candidateRepository.findByCandidateId(candidateId);
-        if (opt.isEmpty()) {
-            throw new IllegalArgumentException("Candidate not found: " + candidateId);
+    public boolean rejectCandidate(String candidateId, String reviewedBy) {
+        Optional<HermesCandidate> candidateOpt = repository.findById(candidateId);
+        
+        if (candidateOpt.isEmpty()) {
+            log.warn("Candidate not found: {}", candidateId);
+            return false;
         }
         
-        HermesCandidate candidate = opt.get();
-        if (!candidate.canReview()) {
-            throw new IllegalStateException("Candidate cannot be reviewed: " + candidate.status());
+        HermesCandidate candidate = candidateOpt.get();
+        if (candidate.status() != HermesCandidate.CandidateStatus.PENDING) {
+            log.warn("Candidate {} is not in PENDING status (current: {})", candidateId, candidate.status());
+            return false;
         }
         
-        candidateRepository.updateStatus(candidateId, HermesCandidateStatus.REJECTED, reviewedBy);
-        log.info("Candidate rejected: {} by {}", candidateId, reviewedBy);
-    }
-    
-    /**
-     * 应用已批准的候选
-     */
-    public void apply(String candidateId) {
-        Optional<HermesCandidate> opt = candidateRepository.findByCandidateId(candidateId);
-        if (opt.isEmpty()) {
-            throw new IllegalArgumentException("Candidate not found: " + candidateId);
-        }
-        
-        HermesCandidate candidate = opt.get();
-        if (!candidate.canApply()) {
-            throw new IllegalStateException("Candidate cannot be applied: " + candidate.status());
-        }
-        
-        try {
-            String result = hermesApplier.apply(candidate);
-            candidateRepository.updateApplyResult(candidateId, HermesCandidateStatus.APPLIED, result);
-            log.info("Candidate applied: {} - {}", candidateId, result);
-        } catch (Exception e) {
-            candidateRepository.updateApplyResult(candidateId, HermesCandidateStatus.FAILED, e.getMessage());
-            log.error("Candidate apply failed: {} - {}", candidateId, e.getMessage(), e);
-            throw e;
-        }
-    }
-    
-    /**
-     * 统计待审核数量
-     */
-    public long countPending() {
-        return candidateRepository.countPending();
+        repository.updateStatus(candidateId, HermesCandidate.CandidateStatus.REJECTED, reviewedBy);
+        log.info("Rejected candidate {} by {}", candidateId, reviewedBy);
+        return true;
     }
 }

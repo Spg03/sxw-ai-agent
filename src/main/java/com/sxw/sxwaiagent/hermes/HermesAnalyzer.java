@@ -1,164 +1,117 @@
 package com.sxw.sxwaiagent.hermes;
 
-import com.sxw.sxwaiagent.infrastructure.trace.AgentTraceStore;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sxw.sxwaiagent.agent.dto.AgentRunCompletedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.util.UUID;
-
 /**
- * Hermes analyzer.
- * <p>
- * Asynchronously analyzes Agent run traces and generates improvement candidates.
- * This is the core component of the Hermes review system.
- * <p>
- * Analysis dimensions:
- * - Success patterns: which tool combinations work well
- * - Failure patterns: which tool calls failed
- * - User preferences: what response style users prefer
- * - Knowledge gaps: which retrievals did not hit
- * - Prompt effectiveness: which prompt versions perform better
- * - Efficiency issues: which call chains are too long
+ * Hermes 分析器
+ * 
+ * 监听 Agent 运行完成事件，从对话中提取可复用的经验总结，
+ * 生成候选记录供用户审核。
  */
 @Component
 public class HermesAnalyzer {
     
     private static final Logger log = LoggerFactory.getLogger(HermesAnalyzer.class);
     
-    private final HermesCandidateRepository candidateRepository;
-    private final AgentTraceStore agentTraceStore;
+    private final HermesCandidateService candidateService;
+    private final ObjectMapper objectMapper;
     
-    public HermesAnalyzer(
-        HermesCandidateRepository candidateRepository,
-        AgentTraceStore agentTraceStore
-    ) {
-        this.candidateRepository = candidateRepository;
-        this.agentTraceStore = agentTraceStore;
+    public HermesAnalyzer(HermesCandidateService candidateService, ObjectMapper objectMapper) {
+        this.candidateService = candidateService;
+        this.objectMapper = objectMapper;
     }
     
-    /**
-     * 异步分析 Agent 运行完成事件
-     */
-    @Async
     @EventListener
-    public void analyzeAgentRun(AgentRunCompletedEvent event) {
-        log.info("Hermes analyzing agent run: requestId={}, traceId={}, success={}", 
-            event.getRequestId(), event.getTraceId(), event.isSuccess());
+    public void onAgentRunCompleted(AgentRunCompletedEvent event) {
+        String requestId = event.getRequestId();
+        log.debug("Analyzing completed agent run: {}", requestId);
         
         try {
-            // 分析成功模式
-            if (event.isSuccess() && event.getTurnCount() > 0) {
-                analyzeSuccessPattern(event);
+            // Extract data from response (AgentResponse is a record)
+            var response = event.getResponse();
+            if (response == null) {
+                log.debug("No response in event {}, skipping analysis", requestId);
+                return;
             }
             
-            // 分析失败模式
-            if (!event.isSuccess()) {
-                analyzeFailurePattern(event);
+            // AgentResponse record: requestId, traceId, answer, citations, toolCalls, latencyMs
+            String assistantReply = response.answer();
+            int toolCallCount = response.toolCalls() != null ? response.toolCalls().size() : 0;
+            
+            // Note: userMessage and chatId are not in AgentResponse record
+            // For now, skip analysis that requires userMessage
+            if (assistantReply != null && !assistantReply.isBlank()) {
+                analyzeForKnowledge(requestId, event.getTraceId(), assistantReply);
             }
             
-            // 分析效率问题
-            if (event.getTurnCount() > 10) {
-                analyzeEfficiencyIssue(event);
+            // Generate eval case if tools were called
+            if (toolCallCount > 0) {
+                analyzeForEvalCases(requestId, event.getTraceId(), assistantReply, toolCallCount);
             }
-            
-            log.info("Hermes analysis completed for traceId: {}", event.getTraceId());
             
         } catch (Exception e) {
-            log.error("Hermes analysis failed for traceId={}: {}", 
-                event.getTraceId(), e.getMessage(), e);
+            log.error("Failed to analyze agent run {}: {}", requestId, e.getMessage());
         }
     }
     
-    /**
-     * 分析成功模式
-     */
-    private void analyzeSuccessPattern(AgentRunCompletedEvent event) {
-        String candidateId = "hermes-" + UUID.randomUUID().toString().substring(0, 8);
-        
-        HermesCandidate candidate = new HermesCandidate(
-            null,
-            candidateId,
-            event.getRequestId(),
-            event.getTraceId(),
-            HermesCandidateType.MEMORY,
-            "成功模式：" + event.getProfileCode() + " 执行成功",
-            String.format("Profile %s 在 %d 轮对话后成功完成任务。建议记录此成功模式供后续参考。",
-                event.getProfileCode(), event.getTurnCount()),
-            "memory",
-            new BigDecimal("0.75"),
-            HermesCandidateStatus.PENDING,
-            LocalDateTime.now(),
-            null,
-            null,
-            null,
-            null
-        );
-        
-        candidateRepository.save(candidate);
-        log.debug("Generated success pattern candidate: {}", candidateId);
+    private void analyzeForMemories(String runId, String chatId, String userMessage) {
+        // Extract user preferences and important facts
+        // Simple heuristics - in production, use LLM to analyze
+        if (userMessage.contains("记住") || userMessage.contains("偏好") || userMessage.contains("喜欢")) {
+            candidateService.createCandidate(
+                runId,
+                chatId,
+                CandidateType.MEMORY,
+                "用户偏好记录",
+                userMessage,
+                "{\"source\": \"user_explicit\"}"
+            );
+        }
     }
     
-    /**
-     * 分析失败模式
-     */
-    private void analyzeFailurePattern(AgentRunCompletedEvent event) {
-        String candidateId = "hermes-" + UUID.randomUUID().toString().substring(0, 8);
-        
-        HermesCandidate candidate = new HermesCandidate(
-            null,
-            candidateId,
-            event.getRequestId(),
-            event.getTraceId(),
-            HermesCandidateType.TOOL_IMPROVEMENT,
-            "失败模式：" + event.getProfileCode() + " 执行失败",
-            String.format("Profile %s 在 %d 轮对话后失败。建议分析失败原因并改进工具或 Prompt。摘要：%s",
-                event.getProfileCode(), event.getTurnCount(), 
-                event.getSummary() != null ? event.getSummary() : "无"),
-            "tool",
-            new BigDecimal("0.85"),
-            HermesCandidateStatus.PENDING,
-            LocalDateTime.now(),
-            null,
-            null,
-            null,
-            null
-        );
-        
-        candidateRepository.save(candidate);
-        log.debug("Generated failure pattern candidate: {}", candidateId);
+    private void analyzeForKnowledge(String runId, String chatId, String assistantReply) {
+        // Extract reusable knowledge from agent responses
+        // Check if response contains structured knowledge
+        if (assistantReply.length() > 500 && containsTechnicalContent(assistantReply)) {
+            candidateService.createCandidate(
+                runId,
+                chatId,
+                CandidateType.KNOWLEDGE,
+                "技术知识点",
+                extractKeyPoints(assistantReply),
+                "{\"length\": " + assistantReply.length() + "}"
+            );
+        }
     }
     
-    /**
-     * 分析效率问题
-     */
-    private void analyzeEfficiencyIssue(AgentRunCompletedEvent event) {
-        String candidateId = "hermes-" + UUID.randomUUID().toString().substring(0, 8);
-        
-        HermesCandidate candidate = new HermesCandidate(
-            null,
-            candidateId,
-            event.getRequestId(),
-            event.getTraceId(),
-            HermesCandidateType.AGENT_RULE,
-            "效率问题：对话轮次过多",
-            String.format("Profile %s 使用了 %d 轮对话完成任务，可能存在效率问题。建议优化 Prompt 或工具调用策略。",
-                event.getProfileCode(), event.getTurnCount()),
-            "agent_rule",
-            new BigDecimal("0.70"),
-            HermesCandidateStatus.PENDING,
-            LocalDateTime.now(),
-            null,
-            null,
-            null,
-            null
+    private void analyzeForEvalCases(String runId, String chatId, String assistantReply, int toolCallCount) {
+        // Generate test cases from successful interactions with tools
+        candidateService.createCandidate(
+            runId,
+            chatId,
+            CandidateType.EVAL_CASE,
+            "工具调用测试用例",
+            String.format("工具调用次数: %d\n回复长度: %d 字符", toolCallCount, assistantReply.length()),
+            "{\"tool_calls\": " + toolCallCount + ", \"reply_length\": " + assistantReply.length() + "}"
         );
-        
-        candidateRepository.save(candidate);
-        log.debug("Generated efficiency issue candidate: {}", candidateId);
+    }
+    
+    private boolean containsTechnicalContent(String text) {
+        return text.contains("步骤") || text.contains("方法") || text.contains("原理") ||
+               text.contains("```") || text.contains("代码");
+    }
+    
+    private String extractKeyPoints(String text) {
+        // Simple extraction - in production, use LLM
+        if (text.length() > 1000) {
+            return text.substring(0, 1000) + "...";
+        }
+        return text;
     }
 }
