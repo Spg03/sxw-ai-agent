@@ -17,6 +17,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
@@ -43,13 +44,14 @@ public class ToolUseLoopRuntime implements AgentRuntime {
     private static final Logger log = LoggerFactory.getLogger(ToolUseLoopRuntime.class);
     
     private static final int MAX_TURNS = 10;
+    private static final int MAX_HISTORY_MESSAGES = 100;
     
     private final ChatModel chatModel;
     private final ToolExecutor toolExecutor;
     private final ApplicationEventPublisher eventPublisher;
     
     public ToolUseLoopRuntime(
-            ChatModel chatModel,
+            @Qualifier("dashscopeChatModel") ChatModel chatModel,
             ToolExecutor toolExecutor,
             ApplicationEventPublisher eventPublisher
     ) {
@@ -73,9 +75,10 @@ public class ToolUseLoopRuntime implements AgentRuntime {
             messages.add(new SystemMessage(profile.systemPrompt()));
         }
         
-        // 2. 历史消息
+        // 2. 历史消息（裁剪防止溢出）
         if (context.history() != null) {
-            messages.addAll(context.history());
+            List<Message> trimmedHistory = trimHistory(context.history(), MAX_HISTORY_MESSAGES);
+            messages.addAll(trimmedHistory);
         }
         
         // 3. 当前用户消息
@@ -180,5 +183,31 @@ public class ToolUseLoopRuntime implements AgentRuntime {
         ));
         
         return response;
+    }
+    
+    /**
+     * 裁剪历史消息，保留最近的 N 条消息，防止 context 溢出
+     * <p>
+     * 策略：保留最近的 N 条 User/Assistant 消息对，确保对话完整性
+     */
+    private List<Message> trimHistory(List<Message> history, int maxMessages) {
+        if (history.size() <= maxMessages) {
+            return history;
+        }
+        
+        // 从末尾开始保留，确保 User/Assistant 配对完整
+        List<Message> result = new ArrayList<>();
+        int count = 0;
+        
+        for (int i = history.size() - 1; i >= 0 && count < maxMessages; i--) {
+            result.add(0, history.get(i));
+            count++;
+        }
+        
+        if (history.size() > maxMessages) {
+            log.warn("Trimmed history from {} to {} messages", history.size(), result.size());
+        }
+        
+        return result;
     }
 }
