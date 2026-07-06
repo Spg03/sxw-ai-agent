@@ -1,157 +1,94 @@
 package com.sxw.sxwaiagent.web.controller;
 
-import com.sxw.sxwaiagent.evaluation.EvalCase;
-import com.sxw.sxwaiagent.evaluation.EvalRun;
-import com.sxw.sxwaiagent.evaluation.EvalService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.ResponseEntity;
+import com.sxw.sxwaiagent.common.api.Result;
+import com.sxw.sxwaiagent.eval.EvalCase;
+import com.sxw.sxwaiagent.eval.EvalRepository;
+import com.sxw.sxwaiagent.eval.EvalResult;
+import com.sxw.sxwaiagent.eval.EvalRunner;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 
-/**
- * 评测系统控制器
- * <p>
- * 提供评测用例管理和评测运行控制的 REST API。
- */
-@Slf4j
 @RestController
 @RequestMapping("/api/eval")
-@RequiredArgsConstructor
+@Validated
 public class EvalController {
-
-    private final EvalService evalService;
-
-    // ==================== 用例管理 ====================
-
-    /**
-     * 创建评测用例
-     */
-    @PostMapping("/cases")
-    public ResponseEntity<EvalCase> createCase(@RequestBody CreateCaseRequest request) {
-        EvalCase evalCase = evalService.createCase(
-            request.caseName(),
-            request.caseType(),
-            request.profileCode(),
-            request.inputPrompt(),
-            request.expectedOutput(),
-            request.createdBy()
-        );
-        return ResponseEntity.ok(evalCase);
+    
+    private static final Logger log = LoggerFactory.getLogger(EvalController.class);
+    
+    private final EvalRepository evalRepository;
+    private final EvalRunner evalRunner;
+    
+    public EvalController(EvalRepository evalRepository, EvalRunner evalRunner) {
+        this.evalRepository = evalRepository;
+        this.evalRunner = evalRunner;
     }
-
-    /**
-     * 激活评测用例
-     */
-    @PostMapping("/cases/{caseId}/activate")
-    public ResponseEntity<Void> activateCase(@PathVariable String caseId) {
-        evalService.activateCase(caseId);
-        return ResponseEntity.ok().build();
+    
+    @GetMapping("/cases")
+    public Result<List<EvalCase>> getAllCases() {
+        List<EvalCase> cases = evalRepository.findAllCases();
+        return Result.ok(cases);
     }
-
-    /**
-     * 禁用评测用例
-     */
-    @PostMapping("/cases/{caseId}/disable")
-    public ResponseEntity<Void> disableCase(@PathVariable String caseId) {
-        evalService.disableCase(caseId);
-        return ResponseEntity.ok().build();
-    }
-
-    /**
-     * 查询评测用例
-     */
+    
     @GetMapping("/cases/{caseId}")
-    public ResponseEntity<EvalCase> getCase(@PathVariable String caseId) {
-        return evalService.findCase(caseId)
-            .map(ResponseEntity::ok)
-            .orElse(ResponseEntity.notFound().build());
+    public Result<EvalCase> getCase(@PathVariable String caseId) {
+        Optional<EvalCase> evalCase = evalRepository.findCaseById(caseId);
+        return evalCase.map(Result::ok).orElse(Result.error("Eval case not found"));
     }
-
-    /**
-     * 查询所有活跃用例
-     */
-    @GetMapping("/cases/active")
-    public ResponseEntity<List<EvalCase>> getAllActiveCases() {
-        return ResponseEntity.ok(evalService.findAllActiveCases());
-    }
-
-    /**
-     * 按 Profile 查询用例
-     */
-    @GetMapping("/cases/profile/{profileCode}")
-    public ResponseEntity<List<EvalCase>> getCasesByProfile(@PathVariable String profileCode) {
-        return ResponseEntity.ok(evalService.findCasesByProfile(profileCode));
-    }
-
-    // ==================== 评测运行 ====================
-
-    /**
-     * 创建评测运行
-     */
-    @PostMapping("/runs")
-    public ResponseEntity<EvalRun> createRun(@RequestBody CreateRunRequest request) {
-        EvalRun run = evalService.createRun(
-            request.runName(),
-            request.profileCode(),
-            request.caseIds(),
-            request.triggeredBy()
+    
+    @PostMapping("/cases")
+    public Result<String> createCase(@RequestBody CreateCaseRequest request) {
+        log.info("Creating eval case: {}", request.name());
+        
+        EvalCase evalCase = new EvalCase(
+            null,
+            request.name(),
+            request.input(),
+            request.expectedOutput(),
+            request.tags(),
+            Instant.now()
         );
-        return ResponseEntity.ok(run);
+        
+        String caseId = evalRepository.saveCase(evalCase);
+        return Result.ok(caseId);
     }
-
-    /**
-     * 执行评测运行
-     */
-    @PostMapping("/runs/{runId}/execute")
-    public ResponseEntity<Void> executeRun(@PathVariable String runId) {
-        evalService.executeRun(runId);
-        return ResponseEntity.ok().build();
+    
+    @GetMapping("/cases/{caseId}/results")
+    public Result<List<EvalResult>> getCaseResults(@PathVariable String caseId) {
+        List<EvalResult> results = evalRepository.findResultsByCaseId(caseId);
+        return Result.ok(results);
     }
-
-    /**
-     * 查询评测运行
-     */
-    @GetMapping("/runs/{runId}")
-    public ResponseEntity<EvalRun> getRun(@PathVariable String runId) {
-        return evalService.findRun(runId)
-            .map(ResponseEntity::ok)
-            .orElse(ResponseEntity.notFound().build());
+    
+    @PostMapping("/run")
+    public Result<EvalRunner.EvalRunResult> runEval(
+        @RequestParam @NotBlank String agentType,
+        @RequestParam(required = false) List<String> caseIds
+    ) {
+        log.info("Running eval for agent: {} with {} cases", 
+            agentType, caseIds != null ? caseIds.size() : "all");
+        
+        EvalRunner.EvalRunResult result;
+        
+        if (caseIds != null && !caseIds.isEmpty()) {
+            result = evalRunner.runEval(agentType, caseIds);
+        } else {
+            result = evalRunner.runAllCases(agentType);
+        }
+        
+        return Result.ok(result);
     }
-
-    /**
-     * 查询最近的评测运行
-     */
-    @GetMapping("/runs/recent")
-    public ResponseEntity<List<EvalRun>> getRecentRuns(@RequestParam(defaultValue = "10") int limit) {
-        return ResponseEntity.ok(evalService.findRecentRuns(limit));
-    }
-
-    /**
-     * 按 Profile 查询评测运行
-     */
-    @GetMapping("/runs/profile/{profileCode}")
-    public ResponseEntity<List<EvalRun>> getRunsByProfile(@PathVariable String profileCode) {
-        return ResponseEntity.ok(evalService.findRunsByProfile(profileCode));
-    }
-
-    // ==================== 请求 DTO ====================
-
+    
     public record CreateCaseRequest(
-        String caseName,
-        com.sxw.sxwaiagent.evaluation.EvalCaseType caseType,
-        String profileCode,
-        String inputPrompt,
+        @NotBlank String name,
+        @NotBlank String input,
         String expectedOutput,
-        String createdBy
-    ) {}
-
-    public record CreateRunRequest(
-        String runName,
-        String profileCode,
-        List<String> caseIds,
-        String triggeredBy
+        String tags
     ) {}
 }
