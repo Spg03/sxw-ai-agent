@@ -25,32 +25,31 @@ public class FileOperationTool {
 
     @Tool(description = "Read content from a file under the sandboxed file directory")
     public String readFile(@ToolParam(description = "File name (no path separators)") String fileName) {
-        try {
-            Path target = resolve(fileName);
-            return FileUtil.readUtf8String(target.toString());
-        } catch (IllegalArgumentException e) {
-            return "refused: " + e.getMessage();
-        } catch (RuntimeException e) {
-            return "failed to read file: " + e.getMessage();
-        }
+        return safeExecute(fileName, target -> FileUtil.readUtf8String(target.toString()));
     }
 
     @Tool(description = "Write content to a file under the sandboxed file directory")
     public String writeFile(@ToolParam(description = "File name (no path separators)") String fileName,
                             @ToolParam(description = "Content to write to the file") String content) {
-        try {
-            Path target = resolve(fileName);
+        return safeExecute(fileName, target -> {
             String safe = content == null ? "" : content;
             if (safe.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_WRITE_BYTES) {
-                return "refused: content exceeds max size " + MAX_WRITE_BYTES + " bytes";
+                throw new IllegalArgumentException("content exceeds max size " + MAX_WRITE_BYTES + " bytes");
             }
             FileUtil.mkdir(FILE_DIR);
             FileUtil.writeUtf8String(safe, target.toString());
             return "file written successfully: " + target;
+        });
+    }
+
+    private String safeExecute(String fileName, java.util.function.Function<Path, String> action) {
+        try {
+            Path target = resolve(fileName);
+            return action.apply(target);
         } catch (IllegalArgumentException e) {
             return "refused: " + e.getMessage();
         } catch (RuntimeException e) {
-            return "failed to write file: " + e.getMessage();
+            return "failed: " + e.getMessage();
         }
     }
 

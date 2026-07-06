@@ -47,17 +47,25 @@ public class GeneralProfile implements AgentProfile {
     
     @Override
     public List<String> enabledToolNames() {
-        // GeneralProfile 允许使用所有工具
+        // GeneralProfile 允许使用所有工具（使用实际的 @Tool 方法名）
         return List.of(
-                "KnowledgeSearch",
-                "WebSearch",
-                "WebScraping",
-                "ResourceDownload",
-                "PDFGeneration",
-                "RagFlowSearch",
-                "NoteSkill",
-                "SkillTool",
-                "Terminate"
+                "searchRagFlow",
+                "searchWeb",
+                "scrapeWebPage",
+                "downloadResource",
+                "generatePDF",
+                "readFile",
+                "writeFile",
+                "executeTerminalCommand",
+                "createNote",
+                "appendNote",
+                "readNote",
+                "listNotes",
+                "searchNotes",
+                "deleteNote",
+                "listSkills",
+                "loadSkill",
+                "doTerminate"
         );
     }
     

@@ -1,5 +1,7 @@
 package com.sxw.sxwaiagent.auth;
 
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.Mac;
@@ -23,8 +25,10 @@ public class JwtTokenService {
     public String generateToken(String username) {
         long expiresAt = Instant.now().plusSeconds(properties.getJwtExpirationMinutes() * 60).getEpochSecond();
         String header = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}";
-        String payload = "{\"sub\":\"" + escape(username) + "\",\"exp\":" + expiresAt + "}";
-        String unsigned = encode(header) + "." + encode(payload);
+        JSONObject payload = new JSONObject();
+        payload.set("sub", username);
+        payload.set("exp", expiresAt);
+        String unsigned = encode(header) + "." + encode(payload.toString());
         return unsigned + "." + sign(unsigned);
     }
 
@@ -47,11 +51,12 @@ public class JwtTokenService {
             throw new IllegalArgumentException("invalid token signature");
         }
         String payload = new String(URL_DECODER.decode(parts[1]), StandardCharsets.UTF_8);
-        long exp = Long.parseLong(extract(payload, "\"exp\":", "}"));
+        JSONObject claims = JSONUtil.parseObj(payload);
+        long exp = claims.getLong("exp", 0L);
         if (Instant.now().getEpochSecond() > exp) {
             throw new IllegalArgumentException("token expired");
         }
-        return unescape(extract(payload, "\"sub\":\"", "\""));
+        return claims.getStr("sub");
     }
 
     private String sign(String unsigned) {
@@ -68,31 +73,10 @@ public class JwtTokenService {
         return URL_ENCODER.encodeToString(value.getBytes(StandardCharsets.UTF_8));
     }
 
-    private static String extract(String payload, String prefix, String suffix) {
-        int start = payload.indexOf(prefix);
-        if (start < 0) {
-            throw new IllegalArgumentException("missing jwt claim");
-        }
-        start += prefix.length();
-        int end = payload.indexOf(suffix, start);
-        if (end < 0) {
-            throw new IllegalArgumentException("malformed jwt claim");
-        }
-        return payload.substring(start, end);
-    }
-
     private static boolean constantTimeEquals(String left, String right) {
         return java.security.MessageDigest.isEqual(
                 left.getBytes(StandardCharsets.UTF_8),
                 right.getBytes(StandardCharsets.UTF_8)
         );
-    }
-
-    private static String escape(String value) {
-        return value.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
-
-    private static String unescape(String value) {
-        return value.replace("\\\"", "\"").replace("\\\\", "\\");
     }
 }

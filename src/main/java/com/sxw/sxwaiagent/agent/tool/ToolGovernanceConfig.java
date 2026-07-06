@@ -26,21 +26,28 @@ public class ToolGovernanceConfig {
 
     @PostConstruct
     public void registerAllToolDefinitions() {
-        // READ_ONLY 工具
-        toolRegistry.register(ToolDefinition.readOnly("ragFlowSearch", "RAGFlow 知识库检索"));
-        toolRegistry.register(ToolDefinition.readOnly("webSearch", "网络搜索（SearchAPI）"));
-        toolRegistry.register(ToolDefinition.readOnly("webScraping", "网页内容抓取"));
+        // READ_ONLY 工具（对应实际 @Tool 方法名）
+        toolRegistry.register(ToolDefinition.readOnly("searchRagFlow", "RAGFlow 知识库检索"));
+        toolRegistry.register(ToolDefinition.readOnly("searchWeb", "网络搜索（SearchAPI）"));
+        toolRegistry.register(ToolDefinition.readOnly("scrapeWebPage", "网页内容抓取"));
 
         // LOCAL_WRITE 工具
-        toolRegistry.register(ToolDefinition.localWrite("fileOperation", "文件操作（沙箱内读写）"));
-        toolRegistry.register(ToolDefinition.localWrite("pdfGeneration", "PDF 文件生成"));
-        toolRegistry.register(ToolDefinition.localWrite("resourceDownload", "资源文件下载"));
-        toolRegistry.register(ToolDefinition.localWrite("noteSkill", "笔记技能（创建/查询笔记）"));
-        toolRegistry.register(ToolDefinition.localWrite("skillTool", "技能加载工具（列出/加载技能）"));
+        toolRegistry.register(ToolDefinition.localWrite("readFile", "文件读取（沙箱内）"));
+        toolRegistry.register(ToolDefinition.localWrite("writeFile", "文件写入（沙箱内）"));
+        toolRegistry.register(ToolDefinition.localWrite("generatePDF", "PDF 文件生成"));
+        toolRegistry.register(ToolDefinition.localWrite("downloadResource", "资源文件下载"));
+        toolRegistry.register(ToolDefinition.localWrite("createNote", "笔记创建"));
+        toolRegistry.register(ToolDefinition.localWrite("appendNote", "笔记追加"));
+        toolRegistry.register(ToolDefinition.localWrite("readNote", "笔记读取"));
+        toolRegistry.register(ToolDefinition.localWrite("listNotes", "笔记列表"));
+        toolRegistry.register(ToolDefinition.localWrite("searchNotes", "笔记搜索"));
+        toolRegistry.register(ToolDefinition.localWrite("deleteNote", "笔记删除"));
+        toolRegistry.register(ToolDefinition.localWrite("listSkills", "技能列表"));
+        toolRegistry.register(ToolDefinition.localWrite("loadSkill", "技能加载"));
 
         // SHELL / DESTRUCTIVE 工具（需审批，默认关闭）
-        toolRegistry.register(ToolDefinition.shell("terminalOperation", "终端命令执行"));
-        toolRegistry.register(ToolDefinition.destructive("terminate", "终止当前执行"));
+        toolRegistry.register(ToolDefinition.shell("executeTerminalCommand", "终端命令执行"));
+        toolRegistry.register(ToolDefinition.destructive("doTerminate", "终止当前执行"));
 
         log.info("Registered {} tool definitions in ToolRegistry", toolRegistry.size());
     }

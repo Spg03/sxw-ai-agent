@@ -26,8 +26,11 @@ public record AgentRequest(
     
     /**
      * 生成请求 ID（唯一标识本次请求）
+     * <p>
+     * 注意：此方法每次调用都会生成新的 UUID，因此调用方应在入口处调用一次并缓存结果。
+     * 推荐使用 AgentOrchestrator 中的 RequestGuard.generateRequestId() 生成唯一 requestId。
      */
-    public String requestId() {
+    public String generateRequestId() {
         return UUID.randomUUID().toString();
     }
     

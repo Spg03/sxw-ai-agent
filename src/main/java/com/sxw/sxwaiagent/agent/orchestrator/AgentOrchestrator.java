@@ -14,6 +14,7 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Agent 统一调度器
@@ -53,7 +54,8 @@ public class AgentOrchestrator {
         this.toolUseLoopRuntime = findRuntime(runtimes, "ToolUseLoopRuntime");
         
         // P2 集成：分配 Runtime
-        this.runtimeMap = new EnumMap<>(AgentProfileCode.class);
+        // 使用 ConcurrentHashMap 保证 switchRuntime() 的线程安全性
+        this.runtimeMap = new ConcurrentHashMap<>();
         
         // LOVE 和 HERMES 继续使用 LegacyReActRuntime（保持现有行为）
         if (legacyRuntime != null) {
@@ -85,7 +87,7 @@ public class AgentOrchestrator {
         long startTime = System.currentTimeMillis();
         
         // 1. 生成 requestId 和 traceId
-        String requestId = request.requestId();
+        String requestId = request.generateRequestId();
         String traceId = requestGuard.generateTraceId();
         
         log.info("[{}] Handling request: profile={}, chatId={}, stream={}",
