@@ -3,7 +3,8 @@ package com.sxw.sxwaiagent.knowledge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -22,15 +23,18 @@ public class DocumentIngestService {
     private final MarkdownTextSplitter textSplitter;
     private final EmbeddingService embeddingService;
     private final KnowledgeRepository knowledgeRepository;
+    private final TransactionTemplate transactionTemplate;
 
     public DocumentIngestService(
         MarkdownTextSplitter textSplitter,
         EmbeddingService embeddingService,
-        KnowledgeRepository knowledgeRepository
+        KnowledgeRepository knowledgeRepository,
+        PlatformTransactionManager transactionManager
     ) {
         this.textSplitter = textSplitter;
         this.embeddingService = embeddingService;
         this.knowledgeRepository = knowledgeRepository;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     public IngestResult ingestFromFile(Path filePath, boolean force, IndexConfig indexConfig) throws IOException {
@@ -114,7 +118,13 @@ public class DocumentIngestService {
             ? IndexConfig.computeFingerprint(contentHash, indexConfig)
             : null;
 
-        if (existing.isPresent() && (force || !contentHash.equals(existing.get().contentHash()))) {
+        boolean fingerprintChanged = existing.isPresent()
+            && indexConfig != null
+            && existing.get().indexFingerprint() != null
+            && fingerprint != null
+            && !fingerprint.equals(existing.get().indexFingerprint());
+
+        if (existing.isPresent() && (force || !contentHash.equals(existing.get().contentHash()) || fingerprintChanged)) {
             // Update existing document: replace chunks atomically, preserve docId
             String docId = existing.get().docId();
             IngestStatus status = force ? IngestStatus.REINDEXED : IngestStatus.UPDATED;
@@ -146,40 +156,42 @@ public class DocumentIngestService {
         return ingest(doc.title(), doc.sourcePath(), content, true, indexConfig);
     }
 
-    @Transactional
     protected void atomicReplaceChunks(String docId, String title, String sourcePath,
                                         List<MarkdownTextSplitter.DocumentChunk> newChunks,
                                         List<float[]> newVectors,
                                         String contentHash, String indexFingerprint) {
-        knowledgeRepository.deleteChunksByDocId(docId);
-        knowledgeRepository.updateDocumentMetadata(docId, title, sourcePath,
-            newChunks.size(), contentHash, indexFingerprint);
+        transactionTemplate.executeWithoutResult(status -> {
+            knowledgeRepository.deleteChunksByDocId(docId);
+            knowledgeRepository.updateDocumentMetadata(docId, title, sourcePath,
+                newChunks.size(), contentHash, indexFingerprint);
 
-        List<MarkdownTextSplitter.DocumentChunk> updatedChunks = newChunks.stream()
-            .map(c -> new MarkdownTextSplitter.DocumentChunk(
-                c.chunkId().replace("temp_", docId + "_"),
-                docId, c.chunkIndex(), c.breadcrumb(), c.content(), c.tokenCount()
-            ))
-            .toList();
-        knowledgeRepository.saveChunks(updatedChunks, newVectors);
+            List<MarkdownTextSplitter.DocumentChunk> updatedChunks = newChunks.stream()
+                .map(c -> new MarkdownTextSplitter.DocumentChunk(
+                    c.chunkId().replace("temp_", docId + "_"),
+                    docId, c.chunkIndex(), c.breadcrumb(), c.content(), c.tokenCount()
+                ))
+                .toList();
+            knowledgeRepository.saveChunks(updatedChunks, newVectors);
+        });
     }
 
-    @Transactional
     protected String saveDocumentAndChunks(String title, String sourcePath,
                                             List<MarkdownTextSplitter.DocumentChunk> newChunks,
                                             List<float[]> newVectors,
                                             String contentHash, String indexFingerprint) {
-        String docId = knowledgeRepository.saveDocument(title, sourcePath,
-            newChunks.size(), contentHash, indexFingerprint);
+        return transactionTemplate.execute(status -> {
+            String docId = knowledgeRepository.saveDocument(title, sourcePath,
+                newChunks.size(), contentHash, indexFingerprint);
 
-        List<MarkdownTextSplitter.DocumentChunk> updatedChunks = newChunks.stream()
-            .map(c -> new MarkdownTextSplitter.DocumentChunk(
-                c.chunkId().replace("temp_", docId + "_"),
-                docId, c.chunkIndex(), c.breadcrumb(), c.content(), c.tokenCount()
-            ))
-            .toList();
-        knowledgeRepository.saveChunks(updatedChunks, newVectors);
-        return docId;
+            List<MarkdownTextSplitter.DocumentChunk> updatedChunks = newChunks.stream()
+                .map(c -> new MarkdownTextSplitter.DocumentChunk(
+                    c.chunkId().replace("temp_", docId + "_"),
+                    docId, c.chunkIndex(), c.breadcrumb(), c.content(), c.tokenCount()
+                ))
+                .toList();
+            knowledgeRepository.saveChunks(updatedChunks, newVectors);
+            return docId;
+        });
     }
 
     public void deleteDocument(String docId) {

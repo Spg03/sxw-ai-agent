@@ -1,11 +1,16 @@
 package com.sxw.sxwaiagent.knowledge;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 import java.util.Optional;
 
@@ -18,11 +23,28 @@ class DocumentIngestServiceTest {
     @Mock MarkdownTextSplitter textSplitter;
     @Mock EmbeddingService embeddingService;
     @Mock KnowledgeRepository knowledgeRepository;
+    @Mock PlatformTransactionManager transactionManager;
 
     @InjectMocks DocumentIngestService ingestService;
 
+    @BeforeEach
+    void setUp() {
+        lenient().when(transactionManager.getTransaction(any()))
+            .thenReturn(new SimpleTransactionStatus());
+    }
+
     private IndexConfig indexConfig() {
         return new IndexConfig("text-embedding-v3", "1.0", 1000, 100, "1.0");
+    }
+
+    private static String sha256(String input) {
+        try {
+            byte[] hashBytes = MessageDigest.getInstance("SHA-256")
+                .digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hashBytes.length * 2);
+            for (byte b : hashBytes) hex.append(String.format("%02x", b));
+            return hex.toString();
+        } catch (Exception e) { throw new RuntimeException(e); }
     }
 
     @Test
@@ -44,22 +66,48 @@ class DocumentIngestServiceTest {
 
     @Test
     void ingest_sameFingerprint_returnsSkipped() {
-        String contentHash = "somehash";
-        String fingerprint = IndexConfig.computeFingerprint(contentHash, indexConfig());
+        String content = "same content that hashes to somehash";
+        String actualHash = sha256(content);
+        String fingerprint = IndexConfig.computeFingerprint(actualHash, indexConfig());
 
         var existing = new KnowledgeRepository.KnowledgeDocumentRecord(
             "existing-id", "title.md", "path", 3, "ACTIVE",
-            contentHash, fingerprint, java.time.Instant.now()
+            actualHash, fingerprint, java.time.Instant.now()
         );
-        when(knowledgeRepository.findByContentHash(any())).thenReturn(Optional.of(existing));
+        when(knowledgeRepository.findByContentHash(actualHash)).thenReturn(Optional.of(existing));
 
         DocumentIngestService.IngestResult result =
-            ingestService.ingest("title.md", "path", "same content that hashes to somehash", false, indexConfig());
+            ingestService.ingest("title.md", "path", content, false, indexConfig());
 
-        // Will be SKIPPED only if the computed hash matches
-        // Since we can't easily predict SHA-256 of arbitrary content in a test,
-        // test the fingerprint-matching path via reindex instead
-        assertNotNull(result);
+        assertEquals(IngestStatus.SKIPPED, result.status());
+        assertEquals("existing-id", result.docId());
+    }
+
+    @Test
+    void ingest_sameContentDifferentConfig_returnsUpdated() {
+        String content = "content for updated config test";
+        String actualHash = sha256(content);
+        // Existing doc was indexed with a different config (different fingerprint)
+        String oldFingerprint = IndexConfig.computeFingerprint(actualHash,
+            new IndexConfig("old-model", "0.9", 500, 50, "0.5"));
+
+        var existing = new KnowledgeRepository.KnowledgeDocumentRecord(
+            "existing-id", "title.md", "path", 3, "ACTIVE",
+            actualHash, oldFingerprint, java.time.Instant.now()
+        );
+        when(knowledgeRepository.findByContentHash(actualHash)).thenReturn(Optional.of(existing));
+        when(textSplitter.split(any(), any())).thenReturn(List.of(
+            new MarkdownTextSplitter.DocumentChunk("c1", "tmp", 0, "# H", "content", 10)
+        ));
+        when(embeddingService.embedBatch(any())).thenReturn(List.of(new float[]{0.1f}));
+
+        DocumentIngestService.IngestResult result =
+            ingestService.ingest("title.md", "path", content, false, indexConfig());
+
+        assertEquals(IngestStatus.UPDATED, result.status());
+        assertEquals("existing-id", result.docId());
+        verify(knowledgeRepository).deleteChunksByDocId("existing-id");
+        verify(knowledgeRepository).updateDocumentMetadata(eq("existing-id"), any(), any(), anyInt(), any(), any());
     }
 
     @Test
