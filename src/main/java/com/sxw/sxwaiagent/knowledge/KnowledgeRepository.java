@@ -3,11 +3,15 @@ package com.sxw.sxwaiagent.knowledge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -27,18 +31,100 @@ public class KnowledgeRepository {
     }
     
     /**
+     * 按 content_hash 查询文档（用于增量索引去重）
+     */
+    public Optional<KnowledgeDocumentRecord> findByContentHash(String hash) {
+        List<KnowledgeDocumentRecord> results = jdbcTemplate.query(
+            "SELECT doc_id, title, source_path, chunk_count, status, content_hash, " +
+            "index_fingerprint, created_at FROM ai_knowledge_document WHERE content_hash = ? LIMIT 1",
+            new KnowledgeDocumentRowMapper(),
+            hash
+        );
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
+    }
+
+    /**
+     * 按 doc_id 查询文档
+     */
+    public Optional<KnowledgeDocumentRecord> findByDocId(String docId) {
+        List<KnowledgeDocumentRecord> results = jdbcTemplate.query(
+            "SELECT doc_id, title, source_path, chunk_count, status, content_hash, " +
+            "index_fingerprint, created_at FROM ai_knowledge_document WHERE doc_id = ?",
+            new KnowledgeDocumentRowMapper(),
+            docId
+        );
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
+    }
+
+    /**
+     * 更新文档元数据（刷新 updated_at）
+     */
+    public void updateDocument(String docId) {
+        jdbcTemplate.update("""
+            UPDATE ai_knowledge_document
+            SET updated_at = ?
+            WHERE doc_id = ?
+            """,
+            Timestamp.from(Instant.now()), docId
+        );
+        log.debug("Updated document timestamp: {}", docId);
+    }
+
+    /**
+     * 全量更新文档元数据（title, sourcePath, chunkCount, contentHash, indexFingerprint）
+     */
+    public void updateDocumentMetadata(String docId, String title, String sourcePath,
+                                       int chunkCount, String contentHash, String indexFingerprint) {
+        jdbcTemplate.update("""
+            UPDATE ai_knowledge_document
+            SET title = ?, source_path = ?, chunk_count = ?,
+                content_hash = ?, index_fingerprint = ?, updated_at = ?
+            WHERE doc_id = ?
+            """,
+            title, sourcePath, chunkCount, contentHash, indexFingerprint,
+            Timestamp.from(Instant.now()), docId
+        );
+        log.debug("Updated metadata for document: {}", docId);
+    }
+
+    /**
+     * 仅删除文档的所有 chunk（保留文档元数据）
+     */
+    public void deleteChunksByDocId(String docId) {
+        jdbcTemplate.update("DELETE FROM ai_knowledge_chunk WHERE doc_id = ?", docId);
+        log.debug("Deleted chunks for document: {}", docId);
+    }
+
+    /**
      * 保存文档元数据
      */
     public String saveDocument(String title, String sourcePath, int chunkCount) {
+        return saveDocument(title, sourcePath, chunkCount, null, null);
+    }
+
+    /**
+     * 保存文档元数据（含 content_hash）
+     */
+    public String saveDocument(String title, String sourcePath, int chunkCount, String contentHash) {
+        return saveDocument(title, sourcePath, chunkCount, contentHash, null);
+    }
+
+    /**
+     * 保存文档元数据（含 content_hash + index_fingerprint）
+     */
+    public String saveDocument(String title, String sourcePath, int chunkCount,
+                               String contentHash, String indexFingerprint) {
         String docId = UUID.randomUUID().toString();
-        
+
         jdbcTemplate.update("""
-            INSERT INTO ai_knowledge_document (doc_id, title, source_path, chunk_count, status, created_at)
-            VALUES (?, ?, ?, ?, 'ACTIVE', ?)
+            INSERT INTO ai_knowledge_document
+                (doc_id, title, source_path, chunk_count, status, content_hash, index_fingerprint, created_at)
+            VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, ?)
             """,
-            docId, title, sourcePath, chunkCount, Timestamp.from(Instant.now())
+            docId, title, sourcePath, chunkCount, contentHash, indexFingerprint,
+            Timestamp.from(Instant.now())
         );
-        
+
         log.info("Saved document: {} ({} chunks)", docId, chunkCount);
         return docId;
     }
@@ -117,19 +203,10 @@ public class KnowledgeRepository {
      * 列出所有文档
      */
     public List<KnowledgeDocumentRecord> listDocuments() {
-        return jdbcTemplate.query("""
-            SELECT doc_id, title, source_path, chunk_count, status, created_at
-            FROM ai_knowledge_document
-            ORDER BY created_at DESC
-            """,
-            (rs, rowNum) -> new KnowledgeDocumentRecord(
-                rs.getString("doc_id"),
-                rs.getString("title"),
-                rs.getString("source_path"),
-                rs.getInt("chunk_count"),
-                rs.getString("status"),
-                rs.getTimestamp("created_at").toInstant()
-            )
+        return jdbcTemplate.query(
+            "SELECT doc_id, title, source_path, chunk_count, status, content_hash, " +
+            "index_fingerprint, created_at FROM ai_knowledge_document ORDER BY created_at DESC",
+            new KnowledgeDocumentRowMapper()
         );
     }
     
@@ -158,6 +235,29 @@ public class KnowledgeRepository {
         String sourcePath,
         int chunkCount,
         String status,
+        String contentHash,
+        String indexFingerprint,
         Instant createdAt
     ) {}
+
+    /**
+     * RowMapper for KnowledgeDocumentRecord.
+     * SELECT must include: doc_id, title, source_path, chunk_count, status,
+     * content_hash, index_fingerprint, created_at
+     */
+    private static class KnowledgeDocumentRowMapper implements RowMapper<KnowledgeDocumentRecord> {
+        @Override
+        public KnowledgeDocumentRecord mapRow(ResultSet rs, int rowNum) throws SQLException {
+            return new KnowledgeDocumentRecord(
+                rs.getString("doc_id"),
+                rs.getString("title"),
+                rs.getString("source_path"),
+                rs.getInt("chunk_count"),
+                rs.getString("status"),
+                rs.getString("content_hash"),
+                rs.getString("index_fingerprint"),
+                rs.getTimestamp("created_at").toInstant()
+            );
+        }
+    }
 }
