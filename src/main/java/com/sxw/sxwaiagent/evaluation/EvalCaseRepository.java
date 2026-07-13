@@ -8,16 +8,12 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-/**
- * 评测用例仓储
- */
 @Repository
 public class EvalCaseRepository {
 
@@ -33,9 +29,10 @@ public class EvalCaseRepository {
         String sql = """
             INSERT INTO ai_eval_case (
                 case_id, case_name, case_type, status, profile_code,
-                input_prompt, expected_output, validation_rules, tags,
-                priority, created_by, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                input_prompt, expected_output, validation_rules,
+                judge_criteria, validation_mode,
+                tags, priority, created_by, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (case_id) DO UPDATE SET
                 case_name = EXCLUDED.case_name,
                 case_type = EXCLUDED.case_type,
@@ -43,12 +40,16 @@ public class EvalCaseRepository {
                 input_prompt = EXCLUDED.input_prompt,
                 expected_output = EXCLUDED.expected_output,
                 validation_rules = EXCLUDED.validation_rules,
+                judge_criteria = EXCLUDED.judge_criteria,
+                validation_mode = EXCLUDED.validation_mode,
                 tags = EXCLUDED.tags,
                 priority = EXCLUDED.priority,
                 updated_at = EXCLUDED.updated_at
             """;
 
         String tagsStr = evalCase.tags() != null ? String.join(",", evalCase.tags()) : "";
+        String validationMode = evalCase.validationMode() != null
+            ? evalCase.validationMode().name() : ValidationMode.KEYWORD_ONLY.name();
 
         jdbcTemplate.update(sql,
             evalCase.caseId(),
@@ -59,6 +60,8 @@ public class EvalCaseRepository {
             evalCase.inputPrompt(),
             evalCase.expectedOutput(),
             evalCase.validationRules(),
+            evalCase.judgeCriteria(),
+            validationMode,
             tagsStr,
             evalCase.priority(),
             evalCase.createdBy(),
@@ -109,6 +112,17 @@ public class EvalCaseRepository {
         jdbcTemplate.update(sql, status.name(), caseId);
     }
 
+    public void deleteByCaseId(String caseId) {
+        String sql = "DELETE FROM ai_eval_case WHERE case_id = ?";
+        jdbcTemplate.update(sql, caseId);
+        log.info("Deleted eval case: {}", caseId);
+    }
+
+    public List<EvalCase> findAll() {
+        String sql = "SELECT * FROM ai_eval_case ORDER BY created_at DESC";
+        return jdbcTemplate.query(sql, new EvalCaseRowMapper());
+    }
+
     public long countActive() {
         String sql = "SELECT COUNT(*) FROM ai_eval_case WHERE status = 'ACTIVE'";
         Long count = jdbcTemplate.queryForObject(sql, Long.class);
@@ -123,6 +137,11 @@ public class EvalCaseRepository {
                 ? Arrays.asList(tagsStr.split(","))
                 : Collections.emptyList();
 
+            String validationModeStr = rs.getString("validation_mode");
+            ValidationMode validationMode = (validationModeStr != null && !validationModeStr.isEmpty())
+                ? ValidationMode.valueOf(validationModeStr)
+                : ValidationMode.KEYWORD_ONLY;
+
             return new EvalCase(
                 rs.getLong("id"),
                 rs.getString("case_id"),
@@ -133,6 +152,8 @@ public class EvalCaseRepository {
                 rs.getString("input_prompt"),
                 rs.getString("expected_output"),
                 rs.getString("validation_rules"),
+                rs.getString("judge_criteria"),
+                validationMode,
                 tags,
                 rs.getInt("priority"),
                 rs.getString("created_by"),

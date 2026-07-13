@@ -5,149 +5,182 @@ import com.sxw.sxwaiagent.agent.dto.AgentResponse;
 import com.sxw.sxwaiagent.agent.profile.AgentProfile;
 import com.sxw.sxwaiagent.agent.profile.AgentProfileCode;
 import com.sxw.sxwaiagent.agent.runtime.AgentRuntime;
+import com.sxw.sxwaiagent.infrastructure.eval.CaseResult;
+import com.sxw.sxwaiagent.infrastructure.eval.LlmJudgeEvaluator;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * 评测执行器
+ * Evaluation executor with LLM-as-Judge integration.
  * <p>
- * 执行评测用例，验证 Agent 输出是否符合预期。
+ * Executes eval cases against the agent runtime, validates output using
+ * keyword matching and/or LLM-as-Judge, and combines results per ValidationMode.
  */
 @Service
 public class EvalExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(EvalExecutor.class);
+    private static final double JUDGE_PASS_THRESHOLD = 0.7;
 
-    private final Map<AgentProfileCode, AgentProfile> profileMap;
-    private final Map<AgentProfileCode, AgentRuntime> runtimeMap;
+    private final List<AgentProfile> profileList;
+    private final List<AgentRuntime> runtimeList;
+    private final ObjectProvider<LlmJudgeEvaluator> judgeProvider;
+
+    private Map<AgentProfileCode, AgentProfile> profileMap;
+    private AgentRuntime runtime;
 
     public EvalExecutor(
-        Map<AgentProfileCode, AgentProfile> profileMap,
-        Map<AgentProfileCode, AgentRuntime> runtimeMap
+        List<AgentProfile> profileList,
+        List<AgentRuntime> runtimeList,
+        ObjectProvider<LlmJudgeEvaluator> judgeProvider
     ) {
-        this.profileMap = profileMap;
-        this.runtimeMap = runtimeMap;
+        this.profileList = profileList;
+        this.runtimeList = runtimeList;
+        this.judgeProvider = judgeProvider;
     }
 
-    /**
-     * 执行单个评测用例
-     */
+    @PostConstruct
+    void init() {
+        profileMap = new HashMap<>();
+        for (AgentProfile p : profileList) {
+            profileMap.put(p.code(), p);
+        }
+        runtime = runtimeList.stream()
+            .filter(r -> r.getClass().getSimpleName().equals("ToolUseLoopRuntime"))
+            .findFirst()
+            .orElse(runtimeList.isEmpty() ? null : runtimeList.get(0));
+        log.info("EvalExecutor initialized: {} profiles, runtime={}",
+            profileMap.size(), runtime != null ? runtime.getClass().getSimpleName() : "NONE");
+    }
+
     public EvalResult execute(EvalCase evalCase) {
         long startTime = System.currentTimeMillis();
-        
         try {
-            log.info("Executing eval case: {} - {}", evalCase.caseId(), evalCase.caseName());
-
-            // 获取 Profile
-            AgentProfile profile = profileMap.get(evalCase.profileCode());
+            AgentProfile profile = profileMap.get(AgentProfileCode.valueOf(evalCase.profileCode()));
             if (profile == null) {
                 throw new IllegalArgumentException("Profile not found: " + evalCase.profileCode());
             }
-
-            // 获取 Runtime
-            AgentRuntime runtime = runtimeMap.get(evalCase.profileCode());
             if (runtime == null) {
-                throw new IllegalStateException("No runtime configured for profile: " + evalCase.profileCode());
+                throw new IllegalStateException("No runtime configured");
             }
 
-            // 构建 AgentContext
             String requestId = "eval-" + UUID.randomUUID().toString().substring(0, 8);
-            String traceId = "trace-" + UUID.randomUUID().toString().substring(0, 8);
-            
-            AgentContext context = AgentContext.builder()
-                .requestId(requestId)
-                .traceId(traceId)
-                .chatId("eval-chat-" + evalCase.caseId())
-                .profile(profile)
-                .userMessage(evalCase.inputPrompt())
-                .history(List.of())
-                .metadata(Map.of("evalCaseId", evalCase.caseId()))
-                .build();
+            AgentContext context = new AgentContext(
+                requestId,
+                "trace-" + requestId,
+                "eval-chat-" + evalCase.caseId(),
+                profile,
+                evalCase.inputPrompt(),
+                List.of(),
+                Map.of("evalCaseId", evalCase.caseId())
+            );
 
-            // 调用 Agent 执行
             AgentResponse response = runtime.execute(context);
             String actualOutput = response.answer();
-
             long durationMs = System.currentTimeMillis() - startTime;
 
-            // 验证输出
-            boolean passed = validateOutput(actualOutput, evalCase.expectedOutput(), evalCase.validationRules());
+            // Phase 1: Keyword validation
+            boolean keywordPassed = evaluateKeyword(actualOutput, evalCase.expectedOutput(),
+                evalCase.validationRules());
 
-            if (passed) {
-                log.info("Eval case PASSED: {} ({}ms)", evalCase.caseId(), durationMs);
-                return EvalResult.pass(evalCase.caseId(), evalCase.caseName(), actualOutput, evalCase.expectedOutput(), durationMs);
-            } else {
-                String validationDetails = buildValidationDetails(actualOutput, evalCase.expectedOutput());
-                log.warn("Eval case FAILED: {} ({}ms) - {}", evalCase.caseId(), durationMs, validationDetails);
-                return EvalResult.fail(evalCase.caseId(), evalCase.caseName(), actualOutput, evalCase.expectedOutput(), validationDetails, durationMs);
+            // Phase 2: LLM Judge validation
+            JudgeStatus judgeStatus = null;
+            String judgeModel = null;
+            Double judgeScore = null;
+            String judgeReason = null;
+
+            if (evalCase.judgeCriteria() != null && !evalCase.judgeCriteria().isBlank()) {
+                LlmJudgeEvaluator judgeEvaluator = judgeProvider.getIfAvailable();
+                if (judgeEvaluator == null) {
+                    judgeStatus = JudgeStatus.UNAVAILABLE;
+                    judgeReason = "LLM judge is not configured but judgeCriteria is set";
+                } else {
+                    try {
+                        var infraCase = new com.sxw.sxwaiagent.infrastructure.eval.EvalCase(
+                            evalCase.caseId(),
+                            "eval",
+                            evalCase.inputPrompt(),
+                            List.of(),
+                            List.of(),
+                            evalCase.judgeCriteria(),
+                            0
+                        );
+                        CaseResult.Check check = judgeEvaluator.evaluateCase(infraCase, actualOutput);
+                        judgeScore = check.score();
+                        judgeReason = check.reason();
+                        judgeModel = "project-chatmodel";
+                        judgeStatus = check.passed() ? JudgeStatus.PASSED : JudgeStatus.FAILED;
+                    } catch (Exception e) {
+                        judgeStatus = JudgeStatus.TIMEOUT;
+                        judgeReason = "judge error: " + e.getMessage();
+                        log.warn("Judge call failed for case {}: {}", evalCase.caseId(), e.getMessage());
+                    }
+                }
             }
+
+            // Phase 3: Combine per ValidationMode
+            ValidationMode mode = evalCase.validationMode() != null
+                ? evalCase.validationMode() : ValidationMode.KEYWORD_ONLY;
+            boolean passed = combineResults(mode, keywordPassed, judgeStatus);
+
+            String validationDetails = null;
+            if (!passed) {
+                validationDetails = String.format("mode=%s, keyword=%s, judge=%s",
+                    mode, keywordPassed, judgeStatus);
+            }
+
+            log.info("Eval case {}: passed={}, keyword={}, judge={} ({}ms)",
+                evalCase.caseId(), passed, keywordPassed, judgeStatus, durationMs);
+
+            return EvalResult.withJudge(evalCase.caseId(), evalCase.caseName(),
+                passed, keywordPassed, actualOutput, evalCase.expectedOutput(),
+                validationDetails, durationMs,
+                judgeStatus, judgeModel, judgeScore, judgeReason, mode);
 
         } catch (Exception e) {
             long durationMs = System.currentTimeMillis() - startTime;
-            log.error("Eval case ERROR: {} ({}ms) - {}", evalCase.caseId(), durationMs, e.getMessage(), e);
+            log.error("Eval case ERROR: {} ({}ms)", evalCase.caseId(), durationMs, e);
             return EvalResult.error(evalCase.caseId(), evalCase.caseName(), e.getMessage(), durationMs);
         }
     }
 
-    /**
-     * 批量执行评测用例
-     */
     public List<EvalResult> executeBatch(List<EvalCase> cases) {
         List<EvalResult> results = new ArrayList<>();
-        
         for (EvalCase evalCase : cases) {
             if (!evalCase.canRun()) {
                 log.warn("Skipping eval case: {} (status={})", evalCase.caseId(), evalCase.status());
                 continue;
             }
-            
-            EvalResult result = execute(evalCase);
-            results.add(result);
+            results.add(execute(evalCase));
         }
-        
         return results;
     }
 
-    /**
-     * 验证输出是否符合预期
-     */
-    private boolean validateOutput(String actualOutput, String expectedOutput, String validationRules) {
-        if (actualOutput == null || actualOutput.isEmpty()) {
-            return false;
+    private boolean evaluateKeyword(String actual, String expected, String rules) {
+        if (actual == null || actual.isEmpty()) return false;
+        if (expected == null || expected.isEmpty()) return true;
+        if (rules == null || rules.isEmpty()) {
+            return actual.contains(expected) || expected.contains(actual);
         }
-
-        if (expectedOutput == null || expectedOutput.isEmpty()) {
-            // 没有期望输出，只要不为空就算通过
-            return true;
-        }
-
-        // 简单验证：包含关键字
-        if (validationRules == null || validationRules.isEmpty()) {
-            return actualOutput.contains(expectedOutput) || expectedOutput.contains(actualOutput);
-        }
-
-        // 根据验证规则执行
-        // TODO: 实现更复杂的验证逻辑（正则、语义相似度等）
-        return actualOutput.contains(expectedOutput);
+        return actual.contains(expected);
     }
 
-    /**
-     * 构建验证详情
-     */
-    private String buildValidationDetails(String actualOutput, String expectedOutput) {
-        return String.format("Expected contains: '%s', Actual: '%s'",
-            truncate(expectedOutput, 100),
-            truncate(actualOutput, 100));
-    }
-
-    private String truncate(String str, int maxLen) {
-        if (str == null) return "null";
-        return str.length() > maxLen ? str.substring(0, maxLen) + "..." : str;
+    private boolean combineResults(ValidationMode mode, boolean keywordPassed, JudgeStatus judgeStatus) {
+        boolean judgePassed = judgeStatus == JudgeStatus.PASSED;
+        return switch (mode) {
+            case KEYWORD_ONLY -> keywordPassed;
+            case LLM_ONLY -> judgePassed;
+            case ALL -> keywordPassed && judgePassed;
+            case ANY -> keywordPassed || judgePassed;
+        };
     }
 }
