@@ -6,6 +6,11 @@ tmp
 logs
 data
 
+# Frontend build output
+frontend/dist/
+frontend/node_modules/
+frontend/node/
+
 HELP.md
 target/
 !.mvn/wrapper/maven-wrapper.jar
