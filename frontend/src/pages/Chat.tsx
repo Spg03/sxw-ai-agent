@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Bot, User, Sparkles, Heart } from 'lucide-react'
+import { Send, Bot, User, Sparkles, Heart, Wrench, Square } from 'lucide-react'
 import { agentApi } from '../api/agent'
+import { api } from '../api/client'
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
   timestamp: Date
+  toolCalls?: string[]
 }
 
 export default function Chat() {
@@ -13,8 +15,11 @@ export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [streamingContent, setStreamingContent] = useState('')
+  const [toolStatus, setToolStatus] = useState<string | null>(null)
   const [chatId, setChatId] = useState(() => `chat_${Date.now()}`)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const eventSourceRef = useRef<EventSource | null>(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -22,7 +27,14 @@ export default function Chat() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [messages, streamingContent])
+
+  // Cleanup EventSource on unmount
+  useEffect(() => {
+    return () => {
+      eventSourceRef.current?.close()
+    }
+  }, [])
 
   const handleSend = async () => {
     if (!input.trim() || loading) return
@@ -36,24 +48,61 @@ export default function Chat() {
     setMessages(prev => [...prev, userMessage])
     setInput('')
     setLoading(true)
+    setStreamingContent('')
+    setToolStatus(null)
+
+    const token = api.getToken()
 
     try {
-      const res = await agentApi.chat({
-        chatId,
-        profile: mode,
-        message: userMessage.content,
-      })
+      const es = agentApi.streamChat(
+        {
+          chatId,
+          message: userMessage.content,
+          profile: mode,
+        },
+        {
+          onToken: (content) => {
+            setStreamingContent(prev => prev + content)
+          },
+          onToolCall: (toolName) => {
+            setToolStatus(`正在调用: ${toolName}`)
+          },
+          onToolResult: (toolName) => {
+            setToolStatus(`工具 ${toolName} 执行完成`)
+            // 2 秒后清除工具状态
+            setTimeout(() => setToolStatus(null), 2000)
+          },
+          onDone: () => {
+            setStreamingContent(prev => {
+              if (prev) {
+                const assistantMessage: Message = {
+                  role: 'assistant',
+                  content: prev,
+                  timestamp: new Date(),
+                }
+                setMessages(msgs => [...msgs, assistantMessage])
+              }
+              return ''
+            })
+            setToolStatus(null)
+            setLoading(false)
+          },
+          onError: (message) => {
+            const errorMessage: Message = {
+              role: 'assistant',
+              content: `错误：${message}`,
+              timestamp: new Date(),
+            }
+            setMessages(msgs => [...msgs, errorMessage])
+            setStreamingContent('')
+            setToolStatus(null)
+            setLoading(false)
+          },
+        },
+        token
+      )
 
-      if (res.code === 0) {
-        const assistantMessage: Message = {
-          role: 'assistant',
-          content: res.data.answer,
-          timestamp: new Date(),
-        }
-        setMessages(prev => [...prev, assistantMessage])
-      } else {
-        throw new Error(res.message)
-      }
+      eventSourceRef.current = es
     } catch (err: any) {
       const errorMessage: Message = {
         role: 'assistant',
@@ -61,12 +110,30 @@ export default function Chat() {
         timestamp: new Date(),
       }
       setMessages(prev => [...prev, errorMessage])
-    } finally {
       setLoading(false)
     }
   }
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleStopGeneration = () => {
+    eventSourceRef.current?.close()
+    eventSourceRef.current = null
+    // 将已流式内容保存为消息
+    setStreamingContent(prev => {
+      if (prev) {
+        const assistantMessage: Message = {
+          role: 'assistant',
+          content: prev + '\n\n[已停止生成]',
+          timestamp: new Date(),
+        }
+        setMessages(msgs => [...msgs, assistantMessage])
+      }
+      return ''
+    })
+    setToolStatus(null)
+    setLoading(false)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -74,7 +141,15 @@ export default function Chat() {
   }
 
   const clearChat = () => {
+    eventSourceRef.current?.close()
+    // 通知后端清除该会话的记忆（fire-and-forget）
+    agentApi.clearMemory(chatId).catch(err =>
+      console.warn('Failed to clear memory:', err)
+    )
     setMessages([])
+    setStreamingContent('')
+    setToolStatus(null)
+    setLoading(false)
     setChatId(`chat_${Date.now()}`)
   }
 
@@ -123,7 +198,7 @@ export default function Chat() {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {messages.length === 0 && (
+        {messages.length === 0 && !streamingContent && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <div className="w-20 h-20 rounded-full bg-gradient-to-br from-rose-500/20 to-amber-500/20 flex items-center justify-center mx-auto mb-4">
@@ -168,7 +243,43 @@ export default function Chat() {
           </div>
         ))}
 
-        {loading && (
+        {/* Streaming content */}
+        {streamingContent && (
+          <div className="flex justify-start">
+            <div className="flex gap-3 max-w-[80%]">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                mode === 'LOVE'
+                  ? 'bg-gradient-to-br from-rose-500 to-pink-500'
+                  : 'bg-gradient-to-br from-sky-500 to-indigo-500'
+              }`}>
+                <Bot size={16} className="text-white" />
+              </div>
+              <div className="glass rounded-2xl px-4 py-3">
+                <div className="text-sm whitespace-pre-wrap">{streamingContent}<span className="animate-pulse">|</span></div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tool status indicator */}
+        {toolStatus && (
+          <div className="flex justify-start">
+            <div className="flex gap-3">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-amber-500 to-orange-500`}>
+                <Wrench size={16} className="text-white" />
+              </div>
+              <div className="glass rounded-2xl px-4 py-3">
+                <div className="text-sm text-amber-300 flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-amber-400 animate-pulse" />
+                  {toolStatus}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Loading indicator (before streaming starts) */}
+        {loading && !streamingContent && !toolStatus && (
           <div className="flex justify-start">
             <div className="flex gap-3">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
@@ -198,19 +309,29 @@ export default function Chat() {
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyDown}
             placeholder="输入消息，按 Enter 发送..."
             rows={1}
             className="flex-1 px-4 py-3 rounded-xl text-sm resize-none"
             style={{ minHeight: '48px', maxHeight: '120px' }}
           />
-          <button
-            onClick={handleSend}
-            disabled={loading || !input.trim()}
-            className="px-6 py-3 rounded-xl text-sm font-semibold text-slate-900 btn-gradient disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Send size={18} />
-          </button>
+          {loading ? (
+            <button
+              onClick={handleStopGeneration}
+              className="px-6 py-3 rounded-xl text-sm font-semibold bg-rose-500 hover:bg-rose-600 text-white transition-colors flex items-center gap-2"
+            >
+              <Square size={14} className="fill-current" />
+              停止
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!input.trim()}
+              className="px-6 py-3 rounded-xl text-sm font-semibold text-slate-900 btn-gradient disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Send size={18} />
+            </button>
+          )}
         </div>
         <div className="flex items-center justify-between mt-2 text-xs text-slate-500">
           <span>按 Enter 发送，Shift+Enter 换行</span>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { notesApi } from '../api/notes'
 import { Plus, Search, Trash2, FileText } from 'lucide-react'
+import Pagination from '../components/Pagination'
 
 export default function Notes() {
   const [notes, setNotes] = useState<string[]>([])
@@ -11,19 +12,24 @@ export default function Notes() {
   const [showCreate, setShowCreate] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [newContent, setNewContent] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
 
   useEffect(() => {
-    loadNotes()
+    const controller = new AbortController()
+    loadNotes(controller.signal)
+    return () => controller.abort()
   }, [])
 
-  const loadNotes = async () => {
+  const loadNotes = async (signal?: AbortSignal) => {
     try {
-      const res = await notesApi.list()
+      const res = await notesApi.list({ signal })
       if (res.code === 0) {
         const list = res.data.split('\n').filter(Boolean)
         setNotes(list)
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       console.error('Failed to load notes', err)
     } finally {
       setLoading(false)
@@ -100,7 +106,7 @@ export default function Notes() {
               type="text"
               value={searchKeyword}
               onChange={e => setSearchKeyword(e.target.value)}
-              onKeyPress={e => e.key === 'Enter' && handleSearch()}
+              onKeyDown={e => e.key === 'Enter' && handleSearch()}
               placeholder="搜索笔记..."
               className="flex-1 px-3 py-2 rounded-lg text-sm"
             />
@@ -159,7 +165,8 @@ export default function Notes() {
           ) : notes.length === 0 ? (
             <div className="text-center py-8 text-slate-400 text-sm">暂无笔记</div>
           ) : (
-            notes.map(note => (
+            <>
+              {notes.slice((page - 1) * pageSize, page * pageSize).map(note => (
               <div
                 key={note}
                 onClick={() => loadNoteContent(note)}
@@ -183,7 +190,15 @@ export default function Notes() {
                   <Trash2 size={14} />
                 </button>
               </div>
-            ))
+            ))}
+              <Pagination
+                currentPage={page}
+                totalPages={Math.max(1, Math.ceil(notes.length / pageSize))}
+                onPageChange={setPage}
+                pageSize={pageSize}
+                onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
+              />
+            </>
           )}
         </div>
       </div>

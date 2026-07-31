@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { evalApi, type EvalCase, type EvalRun } from '../api/eval'
 import { Plus, Play, Trash2, TestTube, CheckCircle, XCircle } from 'lucide-react'
+import Pagination from '../components/Pagination'
 
 export default function Eval() {
   const [cases, setCases] = useState<EvalCase[]>([])
@@ -8,20 +9,35 @@ export default function Eval() {
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
   const [newCase, setNewCase] = useState({ name: '', input: '', expectedOutput: '', tags: '' })
+  const [casesPage, setCasesPage] = useState(1)
+  const [casesPageSize, setCasesPageSize] = useState(20)
+  const [runsPage, setRunsPage] = useState(1)
+  const [runsPageSize, setRunsPageSize] = useState(20)
+  const [casesTotalPages, setCasesTotalPages] = useState(1)
+  const [runsTotalPages, setRunsTotalPages] = useState(1)
 
   useEffect(() => {
-    loadData()
-  }, [])
+    const controller = new AbortController()
+    loadData(controller.signal)
+    return () => controller.abort()
+  }, [casesPage, casesPageSize, runsPage, runsPageSize])
 
-  const loadData = async () => {
+  const loadData = async (signal?: AbortSignal) => {
     try {
       const [casesRes, runsRes] = await Promise.all([
-        evalApi.listCases(),
-        evalApi.listRuns(),
+        evalApi.listCases({ signal }, casesPage, casesPageSize),
+        evalApi.listRuns({ signal }, runsPage, runsPageSize),
       ])
-      if (casesRes.code === 0) setCases(casesRes.data)
-      if (runsRes.code === 0) setRuns(runsRes.data)
+      if (casesRes.code === 0) {
+        setCases(casesRes.data)
+        setCasesTotalPages(Math.max(1, Math.ceil(casesRes.data.length / casesPageSize) || 1))
+      }
+      if (runsRes.code === 0) {
+        setRuns(runsRes.data)
+        setRunsTotalPages(Math.max(1, Math.ceil(runsRes.data.length / runsPageSize) || 1))
+      }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       console.error('Failed to load eval data', err)
     } finally {
       setLoading(false)
@@ -190,6 +206,13 @@ export default function Eval() {
             ))}
           </div>
         )}
+        <Pagination
+          currentPage={casesPage}
+          totalPages={casesTotalPages}
+          onPageChange={setCasesPage}
+          pageSize={casesPageSize}
+          onPageSizeChange={(size) => { setCasesPageSize(size); setCasesPage(1) }}
+        />
       </div>
 
       {/* Runs */}
@@ -229,6 +252,13 @@ export default function Eval() {
             ))}
           </div>
         )}
+        <Pagination
+          currentPage={runsPage}
+          totalPages={runsTotalPages}
+          onPageChange={setRunsPage}
+          pageSize={runsPageSize}
+          onPageSizeChange={(size) => { setRunsPageSize(size); setRunsPage(1) }}
+        />
       </div>
     </div>
   )

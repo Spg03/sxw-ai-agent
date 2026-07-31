@@ -20,11 +20,14 @@ export interface UserView {
 
 export interface AuthResponse {
   token: string
+  refreshToken: string
   user: UserView
 }
 
 export const authApi = {
   login: (req: LoginRequest) => api.post<AuthResponse>('/auth/login', req),
   register: (req: RegisterRequest) => api.post<AuthResponse>('/auth/register', req),
+  refresh: (refreshToken: string) => api.post<AuthResponse>('/auth/refresh', { refreshToken }),
+  logout: () => api.post<void>('/auth/logout'),
   me: () => api.get<UserView>('/auth/me'),
 }

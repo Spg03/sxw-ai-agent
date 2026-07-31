@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { treeholeApi, type TreeholeEntry } from '../api/treehole'
 import { Plus, Trash2, Heart } from 'lucide-react'
+import Pagination from '../components/Pagination'
 
 export default function Treehole() {
   const [entries, setEntries] = useState<TreeholeEntry[]>([])
@@ -9,18 +10,26 @@ export default function Treehole() {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [creating, setCreating] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [totalPages, setTotalPages] = useState(1)
 
   useEffect(() => {
-    loadEntries()
-  }, [])
+    const controller = new AbortController()
+    loadEntries(controller.signal)
+    return () => controller.abort()
+  }, [page, pageSize])
 
-  const loadEntries = async () => {
+  const loadEntries = async (signal?: AbortSignal) => {
+    setLoading(true)
     try {
-      const res = await treeholeApi.list()
+      const res = await treeholeApi.list({ signal }, page, pageSize)
       if (res.code === 0) {
         setEntries(res.data)
+        setTotalPages(Math.max(1, Math.ceil(res.data.length / pageSize) || 1))
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       console.error('Failed to load treeholes', err)
     } finally {
       setLoading(false)
@@ -134,8 +143,9 @@ export default function Treehole() {
           <p className="text-sm text-slate-400">写下你的第一条树洞吧</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {entries.map(entry => (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {entries.map(entry => (
             <div key={entry.id} className="glass rounded-xl p-6 hover:border-amber-500/30 transition-all">
               <div className="flex items-start justify-between mb-3">
                 <h3 className="text-lg font-semibold text-slate-100">{entry.title}</h3>
@@ -174,7 +184,15 @@ export default function Treehole() {
               </div>
             </div>
           ))}
-        </div>
+          </div>
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            pageSize={pageSize}
+            onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
+          />
+        </>
       )}
     </div>
   )

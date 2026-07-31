@@ -7,7 +7,7 @@ interface AuthContextType {
   loading: boolean
   login: (username: string, password: string) => Promise<void>
   register: (username: string, password: string, nickname?: string) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -22,8 +22,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authApi.me()
         .then(res => {
           if (res.code === 0) setUser(res.data)
+          else api.clearAuth()
         })
-        .catch(() => api.setToken(null))
+        .catch(() => api.clearAuth())
         .finally(() => setLoading(false))
     } else {
       setLoading(false)
@@ -34,9 +35,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await authApi.login({ username, password })
     if (res.code === 0) {
       api.setToken(res.data.token)
+      api.setRefreshToken(res.data.refreshToken)
       setUser(res.data.user)
     } else {
-      throw new Error(res.message)
+      throw new Error(res.message || '登录失败')
     }
   }
 
@@ -44,14 +46,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await authApi.register({ username, password, nickname })
     if (res.code === 0) {
       api.setToken(res.data.token)
+      api.setRefreshToken(res.data.refreshToken)
       setUser(res.data.user)
     } else {
-      throw new Error(res.message)
+      throw new Error(res.message || '注册失败')
     }
   }
 
-  const logout = () => {
-    api.setToken(null)
+  const logout = async () => {
+    // 调用后端 /auth/logout：将 access token 加入黑名单 + revoke 所有 refresh token
+    try {
+      await authApi.logout()
+    } catch {
+      // 即使服务端 logout 失败，也要清除本地 token
+    }
+    api.clearAuth()
     setUser(null)
   }
 

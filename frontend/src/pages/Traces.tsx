@@ -1,23 +1,50 @@
 import { useState, useEffect } from 'react'
 import { traceApi, type TraceRun } from '../api/traces'
-import { Activity, Clock, Zap } from 'lucide-react'
+import { Activity, Clock, Zap, MessageSquare } from 'lucide-react'
+import Pagination from '../components/Pagination'
+
+function formatTime(iso: string): string {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  } catch {
+    return iso
+  }
+}
+
+function computeLatency(startedAt: string, finishedAt: string | null): string {
+  if (!finishedAt) return '...'
+  const ms = new Date(finishedAt).getTime() - new Date(startedAt).getTime()
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
 
 export default function Traces() {
   const [traces, setTraces] = useState<TraceRun[]>([])
   const [selectedTrace, setSelectedTrace] = useState<TraceRun | null>(null)
   const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [totalPages, setTotalPages] = useState(1)
 
   useEffect(() => {
-    loadTraces()
-  }, [])
+    const controller = new AbortController()
+    loadTraces(controller.signal)
+    return () => controller.abort()
+  }, [page, pageSize])
 
-  const loadTraces = async () => {
+  const loadTraces = async (signal?: AbortSignal) => {
+    setLoading(true)
     try {
-      const res = await traceApi.list()
+      const res = await traceApi.list(50, signal, page, pageSize)
       if (res.code === 0) {
-        setTraces(res.data)
+        const data = res.data ?? []
+        setTraces(data)
+        // 如果后端返回了总数，可据此计算总页数；此处用简单估算
+        setTotalPages(Math.max(1, Math.ceil(data.length / pageSize) || 1))
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       console.error('Failed to load traces', err)
     } finally {
       setLoading(false)
@@ -26,13 +53,24 @@ export default function Traces() {
 
   const loadTraceDetail = async (traceId: string) => {
     try {
-      const res = await traceApi.get(traceId)
-      if (res.code === 0) {
+      const res = await traceApi.getByTraceId(traceId)
+      if (res.code === 0 && res.data) {
         setSelectedTrace(res.data)
       }
     } catch (err) {
       console.error('Failed to load trace', err)
     }
+  }
+
+  const handlePageChange = (newPage: number) => {
+    setPage(newPage)
+    setSelectedTrace(null)
+  }
+
+  const handlePageSizeChange = (size: number) => {
+    setPageSize(size)
+    setPage(1)
+    setSelectedTrace(null)
   }
 
   return (
@@ -69,7 +107,7 @@ export default function Traces() {
                   }`}
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-mono text-slate-300">
+                    <span className="text-xs font-mono text-slate-300" title={trace.traceId}>
                       {trace.traceId.slice(-8)}
                     </span>
                     <span className={`px-2 py-0.5 rounded-full text-xs ${
@@ -82,16 +120,34 @@ export default function Traces() {
                       {trace.status}
                     </span>
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-slate-400">
+                  <div className="flex items-center gap-3 text-xs text-slate-400 mb-1">
+                    <span className="flex items-center gap-1" title={trace.chatId}>
+                      <MessageSquare size={12} />
+                      {trace.chatId.slice(-6)}
+                    </span>
                     <span className="flex items-center gap-1">
                       <Zap size={12} />
-                      {trace.events.length} 事件
+                      {trace.events?.length ?? 0} 事件
                     </span>
+                    <span className="flex items-center gap-1">
+                      <Clock size={12} />
+                      {computeLatency(trace.startedAt, trace.finishedAt)}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {formatTime(trace.startedAt)}
                   </div>
                 </div>
               ))}
             </div>
           )}
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+            pageSize={pageSize}
+            onPageSizeChange={handlePageSizeChange}
+          />
         </div>
 
         {/* Trace Detail */}
@@ -102,6 +158,7 @@ export default function Traces() {
                 <div>
                   <h2 className="text-xl font-bold text-slate-100">追踪详情</h2>
                   <p className="text-xs font-mono text-slate-400 mt-1">{selectedTrace.traceId}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">chatId: {selectedTrace.chatId}</p>
                 </div>
                 <span className={`px-3 py-1 rounded-full text-sm ${
                   selectedTrace.status === 'completed'
@@ -115,13 +172,11 @@ export default function Traces() {
               </div>
 
               <div className="space-y-3">
-                {selectedTrace.events.map((event, idx) => (
+                {(selectedTrace.events ?? []).map((event, idx) => (
                   <div key={idx} className="relative pl-8 pb-4">
-                    {/* Timeline line */}
-                    {idx < selectedTrace.events.length - 1 && (
+                    {idx < (selectedTrace.events?.length ?? 0) - 1 && (
                       <div className="absolute left-3 top-4 bottom-0 w-px bg-white/10" />
                     )}
-                    {/* Timeline dot */}
                     <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-gradient-to-br from-sky-500 to-blue-500 flex items-center justify-center shadow-lg shadow-sky-500/20">
                       <div className="w-2 h-2 rounded-full bg-white" />
                     </div>

@@ -1,5 +1,9 @@
 import { api } from './client'
 
+interface RequestOptions {
+  signal?: AbortSignal
+}
+
 export interface EvalCase {
   id: number
   name: string
@@ -21,10 +25,16 @@ export interface EvalRun {
 }
 
 export const evalApi = {
-  listCases: () => api.get<EvalCase[]>('/eval/cases'),
-  createCase: (c: Omit<EvalCase, 'id'>) => api.post<EvalCase>('/eval/cases', c),
-  deleteCase: (id: number) => api.delete<void>(`/eval/cases/${id}`),
-  listRuns: () => api.get<EvalRun[]>('/eval/runs'),
-  startRun: (name: string, caseIds?: number[]) => api.post<EvalRun>('/eval/runs', { name, caseIds }),
-  getRun: (id: number) => api.get<EvalRun>(`/eval/runs/${id}`),
+  listCases: (options?: RequestOptions, page = 1, size = 20) =>
+    api.get<EvalCase[]>(`/eval/cases?page=${page}&size=${size}`, options),
+  createCase: (c: Omit<EvalCase, 'id'>, options?: RequestOptions) =>
+    api.post<EvalCase>('/eval/cases', c, options),
+  deleteCase: (id: number, options?: RequestOptions) =>
+    api.delete<void>(`/eval/cases/${id}`, options),
+  listRuns: (options?: RequestOptions, page = 1, size = 20) =>
+    api.get<EvalRun[]>(`/eval/runs?page=${page}&size=${size}`, options),
+  startRun: (name: string, caseIds?: number[], options?: RequestOptions) =>
+    api.post<EvalRun>('/eval/runs', { name, caseIds }, options),
+  getRun: (id: number, options?: RequestOptions) =>
+    api.get<EvalRun>(`/eval/runs/${id}`, options),
 }

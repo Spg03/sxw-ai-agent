@@ -1,5 +1,9 @@
 import { api } from './client'
 
+interface RequestOptions {
+  signal?: AbortSignal
+}
+
 export interface TreeholeEntry {
   id: number
   title: string
@@ -16,8 +20,8 @@ export interface CreateTreeholeRequest {
 }
 
 export const treeholeApi = {
-  create: (req: CreateTreeholeRequest) => api.post<TreeholeEntry>('/treeholes', req),
-  list: () => api.get<TreeholeEntry[]>('/treeholes'),
-  get: (id: number) => api.get<TreeholeEntry>(`/treeholes/${id}`),
-  delete: (id: number) => api.delete<void>(`/treeholes/${id}`),
+  create: (req: CreateTreeholeRequest, options?: RequestOptions) => api.post<TreeholeEntry>('/treeholes', req, options),
+  list: (options?: RequestOptions, page = 1, size = 20) => api.get<TreeholeEntry[]>(`/treeholes?page=${page}&size=${size}`, options),
+  get: (id: number, options?: RequestOptions) => api.get<TreeholeEntry>(`/treeholes/${id}`, options),
+  delete: (id: number, options?: RequestOptions) => api.delete<void>(`/treeholes/${id}`, options),
 }

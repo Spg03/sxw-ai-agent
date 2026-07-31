@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -27,16 +28,18 @@ function AppRoutes() {
 
   return (
     <Layout>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/chat" element={<Chat />} />
-        <Route path="/treehole" element={<Treehole />} />
-        <Route path="/notes" element={<Notes />} />
-        <Route path="/eval" element={<Eval />} />
-        <Route path="/skills" element={<Skills />} />
-        <Route path="/traces" element={<Traces />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/chat" element={<Chat />} />
+          <Route path="/treehole" element={<Treehole />} />
+          <Route path="/notes" element={<Notes />} />
+          <Route path="/eval" element={<Eval />} />
+          <Route path="/skills" element={<Skills />} />
+          <Route path="/traces" element={<Traces />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </ErrorBoundary>
     </Layout>
   )
 }
@@ -44,7 +47,9 @@ function AppRoutes() {
 function App() {
   return (
     <AuthProvider>
-      <AppRoutes />
+      <ErrorBoundary>
+        <AppRoutes />
+      </ErrorBoundary>
     </AuthProvider>
   )
 }
