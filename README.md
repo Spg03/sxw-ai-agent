@@ -34,31 +34,7 @@
 
 ## 核心架构
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        API Gateway Layer                             │
-│  JWT Filter ──► API Key Interceptor ──► Controllers                 │
-├─────────────────────────────────────────────────────────────────────┤
-│                     Agent Orchestration                               │
-│  AgentOrchestrator ──► AgentProfile ──► AgentRuntime                │
-│                          │                      │                    │
-│              ┌───────────┼───────────┐   ┌──────┴──────┐            │
-│              ▼           ▼           ▼   ▼             ▼            │
-│          LoveProfile  GeneralProfile  HermesProfile                 │
-│                                                    LegacyReAct  ToolUseLoop│
-├─────────────────────────────────────────────────────────────────────┤
-│                      Harness Layer                                    │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
-│  │ Tool Gov │ │  Memory  │ │Knowledge │ │  Trace   │ │   Eval   │  │
-│  │ Registry │ │  System  │ │Retrieval │ │ Recorder │ │  Runner  │  │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
-├─────────────────────────────────────────────────────────────────────┤
-│                    Infrastructure Layer                               │
-│  FallbackChatModel ──► DashScope (primary) + Ollama (fallback)      │
-│  Caffeine + Redis Cache │ PgVector │ RAGFlow │ MCP Server/Client   │
-│  Resilience4j (Retry + RateLimit + CircuitBreaker)                  │
-└─────────────────────────────────────────────────────────────────────┘
-```
+![Agent Harness Architecture](./docs/image/architecture.png)
 
 ### 双运行时架构
 
