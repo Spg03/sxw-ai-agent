@@ -3,11 +3,21 @@ spring:
     name: sxw-ai-agent
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
-# 临时注释掉，便于大家开发调试和部署（实际填写 PgVector 数据库信息）
-#  datasource:
-#    url: xxx
-#    username: root
-#    password: ${PGVECTOR_PASSWORD:}
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/sxw_ai_agent}
+    username: ${DATABASE_USERNAME:postgres}
+    password: ${DATABASE_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3000ms
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
+    baseline-on-migrate: true
   ai:
     dashscope:
       # 通过环境变量注入；本地可在 .env 或 shell 中设置 DASHSCOPE_API_KEY
@@ -29,6 +39,12 @@ spring:
         instructions: "sxw-ai-agent 提供的 MCP 技能集（笔记管理等）"
         sse-endpoint: /sse
         sse-message-endpoint: /mcp/message
+    vectorstore:
+      pgvector:
+        index-type: ${PGVECTOR_INDEX_TYPE:HNSW}
+        dimensions: ${PGVECTOR_DIMENSIONS:1536}
+        distance-type: ${PGVECTOR_DISTANCE_TYPE:COSINE_DISTANCE}
+        max-document-batch-size: ${PGVECTOR_MAX_BATCH_SIZE:10000}
 # 临时注释掉，便于大家开发调试和部署（实际需要启动 MCP 客户端对接外部服务）
 #      client:
 #        sse:
@@ -37,13 +53,6 @@ spring:
 #              url: http://localhost:8127
 #        stdio:
 #          servers-configuration: classpath:mcp-servers.json
-# 临时注释掉，便于大家开发调试和部署（实际需要启动 PgVector 数据库）
-#    vectorstore:
-#      pgvector:
-#        index-type: HNSW
-#        dimensions: 1536
-#        distance-type: COSINE_DISTANCE
-#        max-document-batch-size: 10000 # Optional: Maximum number of documents per batch
 server:
   port: ${SERVER_PORT:8123}
   servlet:
@@ -75,9 +84,16 @@ sxw:
       enabled: ${SXW_SECURITY_API_KEY_ENABLED:false}
       value: ${SXW_SECURITY_API_KEY:}
   agent:
+    runtime:
+      max-turns: ${AGENT_MAX_TURNS:10}
+      llm-timeout-seconds: ${LLM_TIMEOUT_SECONDS:60}
+      max-retries: ${LLM_MAX_RETRIES:3}
     trace:
       max-runs: ${SXW_AGENT_TRACE_MAX_RUNS:100}
       max-events-per-run: ${SXW_AGENT_TRACE_MAX_EVENTS_PER_RUN:200}
+    context:
+      max-input-tokens: ${SXW_AGENT_CONTEXT_MAX_INPUT_TOKENS:8192}
+      reserved-output-tokens: ${SXW_AGENT_CONTEXT_RESERVED_OUTPUT_TOKENS:2048}
   skill:
     note:
       base-dir: ${NOTE_BASE_DIR:${user.dir}/tmp/notes}
@@ -88,6 +104,15 @@ sxw:
       enabled: ${LLM_CACHE_ENABLED:true}
       max-size: ${LLM_CACHE_MAX_SIZE:1000}
       ttl-minutes: ${LLM_CACHE_TTL_MINUTES:30}
+  knowledge:
+    embedding-model: ${SXW_KNOWLEDGE_EMBEDDING_MODEL:text-embedding-v3}
+    embedding-model-version: ${SXW_KNOWLEDGE_EMBEDDING_VERSION:1.0}
+    chunk-size: ${SXW_KNOWLEDGE_CHUNK_SIZE:1000}
+    chunk-overlap: ${SXW_KNOWLEDGE_CHUNK_OVERLAP:100}
+    parser-version: ${SXW_KNOWLEDGE_PARSER_VERSION:1.0}
+    rrf:
+      enabled: ${SXW_KNOWLEDGE_RRF_ENABLED:true}
+      k: ${SXW_KNOWLEDGE_RRF_K:60}
   ragflow:
     # RAGFlow 默认关闭；配置 API Key 和 dataset ids 后启用远程知识库检索
     enabled: ${RAGFLOW_ENABLED:false}

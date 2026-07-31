@@ -12,6 +12,27 @@
 # =====================================================================
 
 spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/sxw_ai_agent}
+    username: ${DATABASE_USERNAME:postgres}
+    password: ${DATABASE_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 4
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
   ai:
     dashscope:
       api-key: ${DASHSCOPE_API_KEY:}
@@ -53,6 +74,10 @@ sxw:
       enabled: ${SXW_SECURITY_API_KEY_ENABLED:false}
       value: ${SXW_SECURITY_API_KEY:}
   agent:
+    runtime:
+      max-turns: ${AGENT_MAX_TURNS:10}
+      llm-timeout-seconds: ${LLM_TIMEOUT_SECONDS:60}
+      max-retries: ${LLM_MAX_RETRIES:3}
     trace:
       max-runs: ${SXW_AGENT_TRACE_MAX_RUNS:100}
       max-events-per-run: ${SXW_AGENT_TRACE_MAX_EVENTS_PER_RUN:200}
@@ -172,3 +197,12 @@ info:
     name: ${spring.application.name}
     description: SXW AI Agent - 企业级 AI Agent 演示（MCP / RAG / 缓存 / 熔断）
     profile: prod
+
+# 生产环境禁用 Swagger / Knife4j，避免 API 文档暴露
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+knife4j:
+  enable: false

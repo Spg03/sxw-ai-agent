@@ -295,7 +295,7 @@
                 <version>1.15.1</version>
                 <configuration>
                     <workingDirectory>frontend</workingDirectory>
-                    <nodeVersion>v20.18.0</nodeVersion>
+                    <nodeVersion>v20.19.0</nodeVersion>
                     <skip>${skip.frontend}</skip>
                 </configuration>
                 <executions>

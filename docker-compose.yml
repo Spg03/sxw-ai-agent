@@ -17,8 +17,14 @@ services:
       SXW_SECURITY_API_KEY: ${SXW_SECURITY_API_KEY:-}
       SXW_AGENT_TRACE_MAX_RUNS: ${SXW_AGENT_TRACE_MAX_RUNS:-100}
       SXW_AGENT_TRACE_MAX_EVENTS_PER_RUN: ${SXW_AGENT_TRACE_MAX_EVENTS_PER_RUN:-200}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     volumes:
       - note-data:/data/notes
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/api/health"]
@@ -26,6 +32,20 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: sxw-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
   # 可选：启用 PgVector 时取消注释，并把 application.yml 的 datasource/vectorstore 打开
   # pgvector:
@@ -42,4 +62,5 @@ services:
 
 volumes:
   note-data:
+  redis-data:
   # pgvector-data:
