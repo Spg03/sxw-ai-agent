@@ -12,7 +12,7 @@ class AgentTraceStoreTest {
     @Test
     void storesRunsByChatIdAndReturnsMostRecentFirst() {
         AgentTraceProperties properties = new AgentTraceProperties();
-        AgentTraceStore store = new AgentTraceStore(properties);
+        AgentTraceStore store = new AgentTraceStore(properties, new InMemoryAgentTraceRepository());
 
         String first = store.startRun("chat-a");
         String second = store.startRun("chat-a");
@@ -31,7 +31,7 @@ class AgentTraceStoreTest {
         AgentTraceProperties properties = new AgentTraceProperties();
         properties.setMaxRuns(2);
         properties.setMaxEventsPerRun(2);
-        AgentTraceStore store = new AgentTraceStore(properties);
+        AgentTraceStore store = new AgentTraceStore(properties, new InMemoryAgentTraceRepository());
 
         store.startRun("chat-a");
         String second = store.startRun("chat-a");
@@ -53,7 +53,7 @@ class AgentTraceStoreTest {
 
     @Test
     void finishRunIsIdempotent() {
-        AgentTraceStore store = new AgentTraceStore(new AgentTraceProperties());
+        AgentTraceStore store = new AgentTraceStore(new AgentTraceProperties(), new InMemoryAgentTraceRepository());
         String traceId = store.startRun("chat-a");
 
         store.appendEvent(traceId, 1, "step", null, "", "done", "ok", 10);

@@ -10,8 +10,15 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * API Key 保护开启时的集成测试。
+ * <p>
+ * 注意：Spring Security JWT 认证优先于 API Key 拦截器（Filter 在 Interceptor 之前执行）。
+ * 本测试通过 {@code addFilters = false} 禁用 Security Filter，
+ * 单独验证 API Key 拦截器（MVC Interceptor 层）的行为。
+ */
 @SpringBootTest
-@AutoConfigureMockMvc
+@AutoConfigureMockMvc(addFilters = false)
 @TestPropertySource(properties = {
         "sxw.security.api-key.enabled=true",
         "sxw.security.api-key.value=test-secret"

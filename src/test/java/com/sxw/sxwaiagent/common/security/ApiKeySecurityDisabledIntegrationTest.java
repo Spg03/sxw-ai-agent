@@ -10,6 +10,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * API Key 保护关闭时，公开端点仍可匿名访问；
+ * 但业务端点仍需 JWT 认证（Spring Security 层）。
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 @TestPropertySource(properties = {
@@ -22,8 +26,15 @@ class ApiKeySecurityDisabledIntegrationTest {
     private MockMvc mockMvc;
 
     @Test
-    void protectedEndpointsAllowRequestsWhenApiKeyProtectionIsDisabled() throws Exception {
-        mockMvc.perform(get("/agent/traces/chat-a"))
+    void healthEndpointIsPubliclyAccessible() throws Exception {
+        mockMvc.perform(get("/health"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void businessEndpointsRequireJwtAuthentication() throws Exception {
+        // API Key 关闭后，业务端点仍需 JWT；无 token 应返回 401
+        mockMvc.perform(get("/agent/traces/chat-a"))
+                .andExpect(status().isUnauthorized());
     }
 }

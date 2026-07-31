@@ -3,6 +3,7 @@ package com.sxw.sxwaiagent.manus;
 import com.sxw.sxwaiagent.infrastructure.trace.AgentTraceProperties;
 import com.sxw.sxwaiagent.infrastructure.trace.AgentTraceRun;
 import com.sxw.sxwaiagent.infrastructure.trace.AgentTraceStore;
+import com.sxw.sxwaiagent.infrastructure.trace.InMemoryAgentTraceRepository;
 import com.sxw.sxwaiagent.manus.model.AgentState;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +24,7 @@ class BaseAgentTraceTest {
 
     @Test
     void runRecordsStartStepAndFinishEvents() {
-        AgentTraceStore store = new AgentTraceStore(new AgentTraceProperties());
+        AgentTraceStore store = new AgentTraceStore(new AgentTraceProperties(), new InMemoryAgentTraceRepository());
         OneStepAgent agent = new OneStepAgent();
         agent.setName("test-agent");
         agent.enableTracing(store, "chat-1");
