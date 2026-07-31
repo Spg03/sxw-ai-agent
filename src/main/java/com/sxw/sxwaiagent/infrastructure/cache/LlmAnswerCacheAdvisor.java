@@ -75,11 +75,27 @@ public class LlmAnswerCacheAdvisor implements CallAdvisor {
             increment("hit");
             return cached;
         }
+
+        // 雪崩防护：如果底层缓存支持 singleflight，使用 computeIfAbsent 确保
+        // 同一 key 的并发 miss 只调一次 LLM
+        if (cache instanceof CompositeLlmResponseCache composite) {
+            return composite.computeIfAbsent(key, () -> {
+                ChatClientResponse response = chain.nextCall(chatClientRequest);
+                increment(isStorable(response) ? "miss-stored" : "miss-penetration-guarded");
+                return isStorable(response) ? response : null;
+            });
+        }
+
+        // Fallback：无 singleflight 支持时走原逻辑
         ChatClientResponse response = chain.nextCall(chatClientRequest);
         if (isStorable(response)) {
             cache.put(key, response);
             increment("miss-stored");
         } else {
+            // 穿透防护：对无有效响应的查询缓存空标记，短 TTL 内不再穿透
+            if (cache instanceof CompositeLlmResponseCache composite) {
+                composite.putNull(key);
+            }
             increment("miss-skipped");
         }
         return response;
