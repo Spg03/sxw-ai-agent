@@ -10,6 +10,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * @deprecated Uses legacy ai_trace table. Use {@link com.sxw.sxwaiagent.infrastructure.trace.DbAgentTraceRepository} instead.
+ */
+@Deprecated
 @Repository
 public class TraceRepository {
     

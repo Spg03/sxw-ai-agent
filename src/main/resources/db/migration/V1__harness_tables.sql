@@ -168,42 +168,31 @@ CREATE TABLE IF NOT EXISTS ai_tool_call (
 CREATE INDEX IF NOT EXISTS idx_tool_call_request ON ai_tool_call(request_id);
 
 CREATE TABLE IF NOT EXISTS ai_eval_case (
-    id               BIGSERIAL PRIMARY KEY,
-    case_id          VARCHAR(64)  NOT NULL UNIQUE,
-    case_name        VARCHAR(256) NOT NULL,
-    case_type        VARCHAR(32)  NOT NULL DEFAULT 'FUNCTIONAL',
-    status           VARCHAR(32)  NOT NULL DEFAULT 'ACTIVE',
-    profile_code     VARCHAR(32),
-    input_prompt     TEXT         NOT NULL,
-    expected_output  TEXT,
-    validation_rules TEXT,
-    tags             VARCHAR(512),
-    priority         INTEGER      NOT NULL DEFAULT 0,
-    created_by       VARCHAR(64),
-    created_at       TIMESTAMP    NOT NULL DEFAULT NOW(),
-    updated_at       TIMESTAMP    NOT NULL DEFAULT NOW()
+    id              BIGSERIAL PRIMARY KEY,
+    case_id         VARCHAR(64)  NOT NULL UNIQUE,
+    profile_code    VARCHAR(32),
+    question        TEXT         NOT NULL,
+    expected_answer TEXT,
+    eval_criteria   TEXT,
+    source_request_id VARCHAR(64),
+    status          VARCHAR(32)  NOT NULL DEFAULT 'ACTIVE',
+    created_at      TIMESTAMP    NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS ai_eval_run (
     id              BIGSERIAL PRIMARY KEY,
     run_id          VARCHAR(64)  NOT NULL UNIQUE,
-    run_name        VARCHAR(256) NOT NULL,
-    status          VARCHAR(32)  NOT NULL DEFAULT 'PENDING',
+    case_id         VARCHAR(64)  NOT NULL,
     profile_code    VARCHAR(32),
-    case_ids        TEXT,
-    total_cases     INTEGER      NOT NULL DEFAULT 0,
-    passed_cases    INTEGER      NOT NULL DEFAULT 0,
-    failed_cases    INTEGER      NOT NULL DEFAULT 0,
-    skipped_cases   INTEGER      NOT NULL DEFAULT 0,
-    pass_rate       DECIMAL(5,2),
-    duration_ms     BIGINT,
-    triggered_by    VARCHAR(64),
-    started_at      TIMESTAMP,
-    completed_at    TIMESTAMP,
-    report_path     VARCHAR(512),
-    error_message   TEXT,
+    prompt_version  INT,
+    actual_answer   TEXT,
+    score           DECIMAL(5,4),
+    pass            BOOLEAN,
+    latency_ms      BIGINT,
+    model_name      VARCHAR(128),
     created_at      TIMESTAMP    NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_eval_run_case ON ai_eval_run(case_id);
 
 -- ============================================================
 -- P10: Memory 结构化记忆
@@ -328,39 +317,3 @@ CREATE INDEX IF NOT EXISTS idx_approval_request_request ON ai_approval_request(r
 CREATE INDEX IF NOT EXISTS idx_approval_request_status ON ai_approval_request(status);
 CREATE INDEX IF NOT EXISTS idx_approval_request_tool_name ON ai_approval_request(tool_name);
 CREATE INDEX IF NOT EXISTS idx_approval_request_expires_at ON ai_approval_request(expires_at);
-
--- ============================================================
--- P2: ChatMemory 持久化
--- ============================================================
-CREATE TABLE IF NOT EXISTS ai_chat_memory (
-    conversation_id VARCHAR(100) NOT NULL,
-    content         TEXT        NOT NULL,
-    type            VARCHAR(32) NOT NULL,
-    "timestamp"     TIMESTAMP   NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_chat_memory_conv ON ai_chat_memory(conversation_id, "timestamp");
-
--- ============================================================
--- P2: JWT Refresh Token
--- ============================================================
-CREATE TABLE IF NOT EXISTS ai_refresh_token (
-    id              BIGSERIAL PRIMARY KEY,
-    token_hash      VARCHAR(64)  NOT NULL UNIQUE,
-    username        VARCHAR(64)  NOT NULL,
-    expires_at      TIMESTAMP    NOT NULL,
-    created_at      TIMESTAMP    NOT NULL DEFAULT NOW(),
-    revoked_at      TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_refresh_token_username ON ai_refresh_token(username);
-CREATE INDEX IF NOT EXISTS idx_refresh_token_expires ON ai_refresh_token(expires_at);
-
--- ============================================================
--- P2: JWT Token 黑名单
--- ============================================================
-CREATE TABLE IF NOT EXISTS ai_token_blacklist (
-    id              BIGSERIAL PRIMARY KEY,
-    token_hash      VARCHAR(64)  NOT NULL UNIQUE,
-    expires_at      TIMESTAMP    NOT NULL,
-    created_at      TIMESTAMP    NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_blacklist_expires ON ai_token_blacklist(expires_at);

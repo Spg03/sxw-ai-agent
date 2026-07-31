@@ -65,20 +65,6 @@ public class PlanRepository {
     }
     
     public Optional<Plan> findByPlanId(String planId) {
-        List<Plan> plans = jdbcTemplate.query("""
-            SELECT p.plan_id, p.chat_id, p.goal, p.status, p.created_by, p.reviewed_by,
-                   p.created_at, p.reviewed_at,
-                   s.step_index, s.description, s.tool_name, s.status as step_status
-            FROM ai_plan p
-            LEFT JOIN ai_plan_step s ON p.plan_id = s.plan_id
-            WHERE p.plan_id = ?
-            ORDER BY s.step_index
-            """,
-            (rs, rowNum) -> null,  // Will be handled by result set extraction
-            planId
-        );
-        
-        // Custom extraction logic
         return jdbcTemplate.query("""
             SELECT p.*, s.step_index, s.description, s.tool_name, s.status as step_status
             FROM ai_plan p

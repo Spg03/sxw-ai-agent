@@ -23,7 +23,7 @@ import java.util.Map;
  *   <li>读写均加锁，保证并发安全（Manus 实例本身非线程安全，但同一 chatId 也可能并发触发）；</li>
  *   <li>仅保存 {@link Message} 对象引用，不做序列化。</li>
  * </ul>
- * 如需持久化，可换成 {@code FileBasedChatMemory} / Redis / DB 实现。
+ * 如需持久化，可换成 Redis / DB 实现。
  */
 @Component
 public class ManusMemoryStore {

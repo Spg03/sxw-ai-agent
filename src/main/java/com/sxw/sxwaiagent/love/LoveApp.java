@@ -2,6 +2,7 @@ package com.sxw.sxwaiagent.love;
 
 import com.sxw.sxwaiagent.infrastructure.advisor.MyLoggerAdvisor;
 import com.sxw.sxwaiagent.infrastructure.cache.LlmAnswerCacheAdvisor;
+import com.sxw.sxwaiagent.infrastructure.memory.JdbcChatMemoryRepository;
 import com.sxw.sxwaiagent.infrastructure.resilience.DashScopeResilienceAdvisor;
 import com.sxw.sxwaiagent.infrastructure.rag.QueryRewriter;
 import com.sxw.sxwaiagent.infrastructure.rag.RagFlowKnowledgeService;
@@ -13,7 +14,6 @@ import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.memory.InMemoryChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -42,8 +42,12 @@ public class LoveApp {
             "恋爱状态询问沟通、习惯差异引发的矛盾；已婚状态询问家庭责任与亲属关系处理的问题。" +
             "引导用户详述事情经过、对方反应及自身想法，以便给出专属解决方案。";
 
+    private static final String CONVERSATION_ID_PREFIX = "love:";
+
     /**
      * 初始化 ChatClient，所有依赖统一通过构造函数注入。
+     * ChatMemory 使用共享的 JdbcChatMemoryRepository 实现持久化，
+     * 并在 conversationId 上拼接 "love:" 前缀避免与 AgentOrchestrator 冲突。
      */
     public LoveApp(ChatModel dashscopeChatModel,
                    ObjectProvider<LlmAnswerCacheAdvisor> llmAnswerCacheAdvisorProvider,
@@ -52,16 +56,17 @@ public class LoveApp {
                    QueryRewriter queryRewriter,
                    RagFlowKnowledgeService ragFlowKnowledgeService,
                    ToolCallback[] allTools,
-                   @Qualifier("mcpToolCallbacks") ToolCallbackProvider toolCallbackProvider) {
+                   @Qualifier("mcpToolCallbacks") ToolCallbackProvider toolCallbackProvider,
+                   JdbcChatMemoryRepository jdbcChatMemoryRepository) {
         this.loveAppVectorStore = loveAppVectorStore;
         this.queryRewriter = queryRewriter;
         this.ragFlowKnowledgeService = ragFlowKnowledgeService;
         this.allTools = allTools;
         this.toolCallbackProvider = toolCallbackProvider;
 
-        // 基于内存的对话记忆
+        // 基于 JDBC 持久化的对话记忆，与 AgentOrchestrator 共享同一 Repository Bean
         MessageWindowChatMemory chatMemory = MessageWindowChatMemory.builder()
-                .chatMemoryRepository(new InMemoryChatMemoryRepository())
+                .chatMemoryRepository(jdbcChatMemoryRepository)
                 .maxMessages(20)
                 .build();
         List<Advisor> advisors = new ArrayList<>();
@@ -84,13 +89,20 @@ public class LoveApp {
     }
 
     /**
+     * 为 conversationId 添加 "love:" 前缀，避免与 AgentOrchestrator 的 conversationId 冲突。
+     */
+    private String loveConversationId(String chatId) {
+        return CONVERSATION_ID_PREFIX + chatId;
+    }
+
+    /**
      * AI 基础对话（支持多轮对话记忆）
      */
     public String doChat(String message, String chatId) {
         ChatResponse chatResponse = chatClient
                 .prompt()
                 .user(message)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, loveConversationId(chatId)))
                 .call()
                 .chatResponse();
         String content = chatResponse.getResult().getOutput().getText();
@@ -105,7 +117,7 @@ public class LoveApp {
         return chatClient
                 .prompt()
                 .user(message)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, loveConversationId(chatId)))
                 .stream()
                 .content();
     }
@@ -121,7 +133,7 @@ public class LoveApp {
                 .prompt()
                 .system(SYSTEM_PROMPT + "每次对话后都要生成恋爱结果，标题为{用户名}的恋爱报告，内容为建议列表")
                 .user(message)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, loveConversationId(chatId)))
                 .call()
                 .entity(LoveReport.class);
         log.info("loveReport: {}", loveReport);
@@ -136,7 +148,7 @@ public class LoveApp {
         ChatResponse chatResponse = chatClient
                 .prompt()
                 .user(rewrittenMessage)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, loveConversationId(chatId)))
                 .advisors(new MyLoggerAdvisor())
                 .advisors(new QuestionAnswerAdvisor(loveAppVectorStore))
                 .call()
@@ -158,7 +170,7 @@ public class LoveApp {
         ChatResponse chatResponse = chatClient
                 .prompt()
                 .user(userPrompt)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, loveConversationId(chatId)))
                 .call()
                 .chatResponse();
         String content = chatResponse.getResult().getOutput().getText();
@@ -173,7 +185,7 @@ public class LoveApp {
         ChatResponse chatResponse = chatClient
                 .prompt()
                 .user(message)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, loveConversationId(chatId)))
                 .advisors(new MyLoggerAdvisor())
                 .toolCallbacks(allTools)
                 .call()
@@ -190,7 +202,7 @@ public class LoveApp {
         ChatResponse chatResponse = chatClient
                 .prompt()
                 .user(message)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, loveConversationId(chatId)))
                 .advisors(new MyLoggerAdvisor())
                 .toolCallbacks(toolCallbackProvider)
                 .call()

@@ -80,6 +80,12 @@ public class EvalRunRepository {
         return runs.isEmpty() ? Optional.empty() : Optional.of(runs.get(0));
     }
 
+    public long count() {
+        String sql = "SELECT COUNT(*) FROM ai_eval_run";
+        Long count = jdbcTemplate.queryForObject(sql, Long.class);
+        return count != null ? count : 0;
+    }
+
     public List<EvalRun> findByStatus(EvalRunStatus status) {
         String sql = "SELECT * FROM ai_eval_run WHERE status = ? ORDER BY started_at DESC";
         return jdbcTemplate.query(sql, new EvalRunRowMapper(), status.name());
@@ -93,6 +99,11 @@ public class EvalRunRepository {
     public List<EvalRun> findRecent(int limit) {
         String sql = "SELECT * FROM ai_eval_run ORDER BY started_at DESC LIMIT ?";
         return jdbcTemplate.query(sql, new EvalRunRowMapper(), limit);
+    }
+
+    public List<EvalRun> findAll() {
+        String sql = "SELECT * FROM ai_eval_run ORDER BY started_at DESC";
+        return jdbcTemplate.query(sql, new EvalRunRowMapper());
     }
 
     public void updateStatus(String runId, EvalRunStatus status) {

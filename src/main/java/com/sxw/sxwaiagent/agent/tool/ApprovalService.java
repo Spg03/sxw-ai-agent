@@ -5,8 +5,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.Instant;
+import java.util.Optional;
 
 /**
  * 审批服务
@@ -15,9 +15,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * 记录审批状态，支持查询和更新审批结果。
  * <p>
  * 特性：
- * - 内存存储（ConcurrentHashMap）
- * - TTL 自动过期清理（默认 24 小时）
- * - 定时清理任务（每小时执行）
+ * - PostgreSQL 持久化（ai_approval_request 表），重启不丢失
+ * - TTL 自动过期（默认 24 小时），通过 expires_at 字段记录
+ * - 定时清理任务（每小时执行），将过期的 PENDING 记录标记为 EXPIRED
  */
 @Service
 public class ApprovalService {
@@ -25,11 +25,14 @@ public class ApprovalService {
     private static final Logger log = LoggerFactory.getLogger(ApprovalService.class);
     private static final long DEFAULT_TTL_MS = 24 * 60 * 60 * 1000L; // 24 hours
 
-    // 存储待审批的工具调用请求
-    private final Map<String, ApprovalRequest> pendingApprovals = new ConcurrentHashMap<>();
-    
+    private final ApprovalRequestRepository repository;
+
     // 可配置的 TTL（毫秒）
     private long ttlMs = DEFAULT_TTL_MS;
+
+    public ApprovalService(ApprovalRequestRepository repository) {
+        this.repository = repository;
+    }
 
     /**
      * 创建审批请求
@@ -55,8 +58,15 @@ public class ApprovalService {
                 System.currentTimeMillis() + ttlMs
         );
 
-        pendingApprovals.put(approvalId, request);
-        log.info("Created approval request: {} for tool {} (expires at {})", 
+        try {
+            repository.insert(request);
+        } catch (Exception e) {
+            log.error("Failed to persist approval request: approvalId={}, tool={}, error={}",
+                    approvalId, toolName, e.getMessage(), e);
+            // 即使持久化失败也返回 request 对象，上层可据此处理
+        }
+
+        log.info("Created approval request: {} for tool {} (expires at {})",
                 approvalId, toolName, request.expiresAt());
 
         return request;
@@ -66,11 +76,13 @@ public class ApprovalService {
      * 批准审批请求
      */
     public boolean approve(String approvalId, String approvedBy, String comment) {
-        ApprovalRequest request = pendingApprovals.get(approvalId);
-        if (request == null) {
+        Optional<ApprovalRequest> optRequest = repository.findByApprovalId(approvalId);
+        if (optRequest.isEmpty()) {
             log.warn("Approval request not found: {}", approvalId);
             return false;
         }
+
+        ApprovalRequest request = optRequest.get();
 
         if (request.status() != ApprovalStatus.PENDING) {
             log.warn("Approval request {} is not pending, current status: {}", approvalId, request.status());
@@ -79,25 +91,22 @@ public class ApprovalService {
 
         if (isExpired(request)) {
             log.warn("Approval request {} has expired", approvalId);
-            pendingApprovals.remove(approvalId);
+            repository.updateStatus(approvalId, ApprovalStatus.EXPIRED, null, null);
             return false;
         }
 
-        ApprovalRequest approved = new ApprovalRequest(
-                request.approvalId(),
-                request.requestId(),
-                request.traceId(),
-                request.toolName(),
-                request.arguments(),
-                request.reason(),
-                ApprovalStatus.APPROVED,
-                request.createdAt(),
-                request.expiresAt()
-        );
+        try {
+            int updated = repository.updateStatus(approvalId, ApprovalStatus.APPROVED, approvedBy, comment);
+            if (updated == 0) {
+                log.warn("Failed to update approval request: {}", approvalId);
+                return false;
+            }
+        } catch (Exception e) {
+            log.error("Failed to approve request: approvalId={}, error={}", approvalId, e.getMessage(), e);
+            return false;
+        }
 
-        pendingApprovals.put(approvalId, approved);
         log.info("Approval request {} approved by {}: {}", approvalId, approvedBy, comment);
-
         return true;
     }
 
@@ -105,11 +114,13 @@ public class ApprovalService {
      * 拒绝审批请求
      */
     public boolean reject(String approvalId, String rejectedBy, String reason) {
-        ApprovalRequest request = pendingApprovals.get(approvalId);
-        if (request == null) {
+        Optional<ApprovalRequest> optRequest = repository.findByApprovalId(approvalId);
+        if (optRequest.isEmpty()) {
             log.warn("Approval request not found: {}", approvalId);
             return false;
         }
+
+        ApprovalRequest request = optRequest.get();
 
         if (request.status() != ApprovalStatus.PENDING) {
             log.warn("Approval request {} is not pending, current status: {}", approvalId, request.status());
@@ -118,25 +129,22 @@ public class ApprovalService {
 
         if (isExpired(request)) {
             log.warn("Approval request {} has expired", approvalId);
-            pendingApprovals.remove(approvalId);
+            repository.updateStatus(approvalId, ApprovalStatus.EXPIRED, null, null);
             return false;
         }
 
-        ApprovalRequest rejected = new ApprovalRequest(
-                request.approvalId(),
-                request.requestId(),
-                request.traceId(),
-                request.toolName(),
-                request.arguments(),
-                request.reason(),
-                ApprovalStatus.REJECTED,
-                request.createdAt(),
-                request.expiresAt()
-        );
+        try {
+            int updated = repository.updateStatus(approvalId, ApprovalStatus.REJECTED, rejectedBy, reason);
+            if (updated == 0) {
+                log.warn("Failed to update approval request: {}", approvalId);
+                return false;
+            }
+        } catch (Exception e) {
+            log.error("Failed to reject request: approvalId={}, error={}", approvalId, e.getMessage(), e);
+            return false;
+        }
 
-        pendingApprovals.put(approvalId, rejected);
         log.info("Approval request {} rejected by {}: {}", approvalId, rejectedBy, reason);
-
         return true;
     }
 
@@ -144,10 +152,15 @@ public class ApprovalService {
      * 查询审批请求
      */
     public ApprovalRequest getApprovalRequest(String approvalId) {
-        ApprovalRequest request = pendingApprovals.get(approvalId);
-        if (request != null && isExpired(request)) {
-            log.info("Removing expired approval request: {}", approvalId);
-            pendingApprovals.remove(approvalId);
+        Optional<ApprovalRequest> optRequest = repository.findByApprovalId(approvalId);
+        if (optRequest.isEmpty()) {
+            return null;
+        }
+
+        ApprovalRequest request = optRequest.get();
+        if (isExpired(request)) {
+            log.info("Marking expired approval request: {}", approvalId);
+            repository.updateStatus(approvalId, ApprovalStatus.EXPIRED, null, null);
             return null;
         }
         return request;
@@ -163,19 +176,17 @@ public class ApprovalService {
 
     /**
      * 定时清理过期的审批请求（每小时执行）
+     * 将 expires_at < NOW() 且 status = PENDING 的记录批量更新为 EXPIRED
      */
     @Scheduled(fixedRate = 3600000) // 1 hour
     public void cleanupExpiredApprovals() {
-        int removed = 0;
-        for (String approvalId : pendingApprovals.keySet()) {
-            ApprovalRequest request = pendingApprovals.get(approvalId);
-            if (request != null && isExpired(request)) {
-                pendingApprovals.remove(approvalId);
-                removed++;
+        try {
+            int expired = repository.expirePendingBefore(Instant.now());
+            if (expired > 0) {
+                log.info("Cleaned up {} expired approval requests", expired);
             }
-        }
-        if (removed > 0) {
-            log.info("Cleaned up {} expired approval requests", removed);
+        } catch (Exception e) {
+            log.warn("Failed to cleanup expired approval requests: {}", e.getMessage(), e);
         }
     }
 
@@ -222,6 +233,8 @@ public class ApprovalService {
     public enum ApprovalStatus {
         PENDING,
         APPROVED,
-        REJECTED
+        REJECTED,
+        /** 过期（由定时清理任务或查询时设置） */
+        EXPIRED
     }
 }
