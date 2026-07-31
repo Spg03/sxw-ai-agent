@@ -4,7 +4,7 @@ import com.sxw.sxwaiagent.love.LoveApp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.beans.factory.annotation.Qualifier;
+
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -40,7 +40,7 @@ public class EvalRunner {
     private final LoveApp loveApp;
     private final LlmJudgeEvaluator judge;
 
-    public EvalRunner(LoveApp loveApp, @Qualifier("dashscopeChatModel") ChatModel chatModel) {
+    public EvalRunner(LoveApp loveApp, ChatModel chatModel) {
         this.loveApp = loveApp;
         this.judge = new LlmJudgeEvaluator(chatModel);
     }
