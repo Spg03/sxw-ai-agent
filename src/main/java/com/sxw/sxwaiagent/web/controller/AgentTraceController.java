@@ -27,10 +27,26 @@ public class AgentTraceController {
         this.agentTraceStore = agentTraceStore;
     }
 
-    @GetMapping("/{chatId}")
+    @GetMapping
+    public Result<List<AgentTraceRun>> listAllTraces(
+            @RequestParam(defaultValue = "50") @Min(1) @Max(100) int limit) {
+        return Result.ok(agentTraceStore.findAllRecent(limit));
+    }
+
+    @GetMapping("/{id}")
     public Result<List<AgentTraceRun>> recentRuns(
-            @PathVariable @NotBlank @Size(max = 64) String chatId,
+            @PathVariable @NotBlank @Size(max = 64) String id,
             @RequestParam(defaultValue = "5") @Min(1) @Max(20) int limit) {
-        return Result.ok(agentTraceStore.recentRuns(chatId, limit));
+        return Result.ok(agentTraceStore.recentRuns(id, limit));
+    }
+
+    @GetMapping("/trace/{traceId}")
+    public Result<AgentTraceRun> getByTraceId(
+            @PathVariable @NotBlank @Size(max = 64) String traceId) {
+        List<AgentTraceRun> runs = agentTraceStore.findByTraceId(traceId);
+        if (runs.isEmpty()) {
+            return Result.ok(null);
+        }
+        return Result.ok(runs.get(0));
     }
 }

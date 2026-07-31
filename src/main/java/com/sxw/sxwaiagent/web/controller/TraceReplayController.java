@@ -37,7 +37,7 @@ public class TraceReplayController {
     @GetMapping("/{traceId}")
     public Result<TraceRecord> getTrace(@PathVariable String traceId) {
         Optional<TraceRecord> trace = traceReplayService.getTrace(traceId);
-        return trace.map(Result::ok).orElse(Result.error("Trace not found"));
+        return trace.map(Result::ok).orElse(Result.error(404, "Trace not found"));
     }
     
     @GetMapping("/agent/{agentType}")
@@ -58,7 +58,7 @@ public class TraceReplayController {
         if (result.success()) {
             return Result.ok(result);
         } else {
-            return Result.error(result.message());
+            return Result.error(500, result.message());
         }
     }
 }
