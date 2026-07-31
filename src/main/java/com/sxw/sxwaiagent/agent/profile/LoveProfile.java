@@ -35,8 +35,8 @@ public class LoveProfile implements AgentProfile {
     
     @Override
     public List<String> enabledToolNames() {
-        // LoveProfile 只允许只读工具（知识检索）
-        return List.of("KnowledgeSearch", "NotesSearch");
+        // LoveProfile 只允许只读工具（READ_ONLY 风险等级）
+        return List.of("searchRagFlow");
     }
     
     @Override

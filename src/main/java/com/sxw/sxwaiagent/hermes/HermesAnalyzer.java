@@ -1,12 +1,14 @@
 package com.sxw.sxwaiagent.hermes;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxw.sxwaiagent.agent.dto.AgentRunCompletedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
+
+import java.util.Map;
 
 /**
  * Hermes 分析器
@@ -44,14 +46,14 @@ public class HermesAnalyzer {
             String assistantReply = response.answer();
             int toolCallCount = response.toolCalls() != null ? response.toolCalls().size() : 0;
             
-            // Note: userMessage and chatId are not in AgentResponse record
-            // For now, skip analysis that requires userMessage
+            // Analyze for memory candidates from assistant reply
             if (assistantReply != null && !assistantReply.isBlank()) {
+                analyzeForMemories(requestId, event.getTraceId(), assistantReply);
                 analyzeForKnowledge(requestId, event.getTraceId(), assistantReply);
             }
             
             // Generate eval case if tools were called
-            if (toolCallCount > 0) {
+            if (toolCallCount > 0 && assistantReply != null) {
                 analyzeForEvalCases(requestId, event.getTraceId(), assistantReply, toolCallCount);
             }
             
@@ -60,46 +62,64 @@ public class HermesAnalyzer {
         }
     }
     
-    private void analyzeForMemories(String runId, String chatId, String userMessage) {
-        // Extract user preferences and important facts
+    /**
+     * 从 assistant 回复中提取用户偏好和重要事实
+     * <p>
+     * 由于事件不携带 userMessage，改为分析 assistant 回复中的记忆关键词。
+     * 在生产环境中应使用 LLM 进行更精准的分析。
+     */
+    private void analyzeForMemories(String runId, String traceId, String assistantReply) {
         // Simple heuristics - in production, use LLM to analyze
-        if (userMessage.contains("记住") || userMessage.contains("偏好") || userMessage.contains("喜欢")) {
-            candidateService.createCandidate(
-                runId,
-                chatId,
-                CandidateType.MEMORY,
-                "用户偏好记录",
-                userMessage,
-                "{\"source\": \"user_explicit\"}"
-            );
+        if (assistantReply.contains("记住") || assistantReply.contains("偏好")
+                || assistantReply.contains("喜欢") || assistantReply.contains("已记录")) {
+            try {
+                candidateService.createCandidate(
+                    runId,
+                    null, // TODO: AgentRunCompletedEvent 不含 chatId，后续应在事件中添加
+                    CandidateType.MEMORY,
+                    "用户偏好记录",
+                    assistantReply.length() > 500 ? assistantReply.substring(0, 500) + "..." : assistantReply,
+                    objectMapper.writeValueAsString(Map.of("source", "assistant_reply", "traceId", traceId))
+                );
+            } catch (JsonProcessingException e) {
+                log.warn("Failed to serialize metadata for memory candidate in run {}", runId, e);
+            }
         }
     }
-    
-    private void analyzeForKnowledge(String runId, String chatId, String assistantReply) {
+
+    private void analyzeForKnowledge(String runId, String traceId, String assistantReply) {
         // Extract reusable knowledge from agent responses
         // Check if response contains structured knowledge
         if (assistantReply.length() > 500 && containsTechnicalContent(assistantReply)) {
-            candidateService.createCandidate(
-                runId,
-                chatId,
-                CandidateType.KNOWLEDGE,
-                "技术知识点",
-                extractKeyPoints(assistantReply),
-                "{\"length\": " + assistantReply.length() + "}"
-            );
+            try {
+                candidateService.createCandidate(
+                    runId,
+                    null, // TODO: AgentRunCompletedEvent 不含 chatId，后续应在事件中添加
+                    CandidateType.KNOWLEDGE,
+                    "技术知识点",
+                    extractKeyPoints(assistantReply),
+                    objectMapper.writeValueAsString(Map.of("length", assistantReply.length()))
+                );
+            } catch (JsonProcessingException e) {
+                log.warn("Failed to serialize metadata for knowledge candidate in run {}", runId, e);
+            }
         }
     }
-    
-    private void analyzeForEvalCases(String runId, String chatId, String assistantReply, int toolCallCount) {
+
+    private void analyzeForEvalCases(String runId, String traceId, String assistantReply, int toolCallCount) {
         // Generate test cases from successful interactions with tools
-        candidateService.createCandidate(
-            runId,
-            chatId,
-            CandidateType.EVAL_CASE,
-            "工具调用测试用例",
-            String.format("工具调用次数: %d\n回复长度: %d 字符", toolCallCount, assistantReply.length()),
-            "{\"tool_calls\": " + toolCallCount + ", \"reply_length\": " + assistantReply.length() + "}"
-        );
+        try {
+            candidateService.createCandidate(
+                runId,
+                null, // TODO: AgentRunCompletedEvent 不含 chatId，后续应在事件中添加
+                CandidateType.EVAL_CASE,
+                "工具调用测试用例",
+                String.format("工具调用次数: %d\n回复长度: %d 字符", toolCallCount, assistantReply.length()),
+                objectMapper.writeValueAsString(Map.of("tool_calls", toolCallCount, "reply_length", assistantReply.length()))
+            );
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to serialize metadata for eval candidate in run {}", runId, e);
+        }
     }
     
     private boolean containsTechnicalContent(String text) {

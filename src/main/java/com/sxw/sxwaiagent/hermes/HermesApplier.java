@@ -44,8 +44,8 @@ public class HermesApplier {
             case KNOWLEDGE -> applyKnowledge(candidate);
             case EVAL_CASE -> applyEvalCase(candidate);
             case AGENT_RULE -> applyAgentRule(candidate);
-            case PROMPT_IMPROVEMENT -> applyPromptImprovement(candidate);
-            case TOOL_IMPROVEMENT -> applyToolImprovement(candidate);
+            case PROMPT_IMPROVEMENT, PROMPT_HINT -> applyPromptImprovement(candidate);
+            case TOOL_IMPROVEMENT, TOOL_PATTERN -> applyToolImprovement(candidate);
             case DOC_UPDATE -> applyDocUpdate(candidate);
         };
     }
@@ -83,6 +83,7 @@ public class HermesApplier {
     /**
      * 应用知识候选（预留实现）
      */
+    // TODO: Implement real knowledge apply via KnowledgeService
     private String applyKnowledge(HermesCandidate candidate) {
         log.info("Knowledge candidate applied: {} (placeholder)", candidate.candidateId());
         return "Knowledge candidate recorded (implementation pending)";
@@ -91,6 +92,7 @@ public class HermesApplier {
     /**
      * 应用评测用例候选（预留实现）
      */
+    // TODO: Implement real eval case apply via EvalCaseService
     private String applyEvalCase(HermesCandidate candidate) {
         log.info("Eval case candidate applied: {} (placeholder)", candidate.candidateId());
         return "Eval case recorded (implementation pending)";
@@ -99,6 +101,7 @@ public class HermesApplier {
     /**
      * 应用 Agent 规则候选（预留实现）
      */
+    // TODO: Implement real agent rule apply
     private String applyAgentRule(HermesCandidate candidate) {
         log.info("Agent rule candidate applied: {} (placeholder)", candidate.candidateId());
         return "Agent rule recorded (implementation pending)";
@@ -107,6 +110,7 @@ public class HermesApplier {
     /**
      * 应用 Prompt 改进候选（预留实现）
      */
+    // TODO: Implement real prompt improvement apply via PromptService
     private String applyPromptImprovement(HermesCandidate candidate) {
         log.info("Prompt improvement candidate applied: {} (placeholder)", candidate.candidateId());
         return "Prompt improvement recorded (implementation pending)";
@@ -115,6 +119,7 @@ public class HermesApplier {
     /**
      * 应用工具改进候选（预留实现）
      */
+    // TODO: Implement real tool improvement apply via ToolRegistry
     private String applyToolImprovement(HermesCandidate candidate) {
         log.info("Tool improvement candidate applied: {} (placeholder)", candidate.candidateId());
         return "Tool improvement recorded (implementation pending)";
@@ -123,6 +128,7 @@ public class HermesApplier {
     /**
      * 应用文档更新候选（预留实现）
      */
+    // TODO: Implement real doc update apply
     private String applyDocUpdate(HermesCandidate candidate) {
         log.info("Doc update candidate applied: {} (placeholder)", candidate.candidateId());
         return "Doc update recorded (implementation pending)";

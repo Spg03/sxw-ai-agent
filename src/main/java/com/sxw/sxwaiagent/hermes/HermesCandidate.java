@@ -1,5 +1,6 @@
 package com.sxw.sxwaiagent.hermes;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
@@ -18,11 +19,27 @@ public record HermesCandidate(
     CandidateStatus status,
     String reviewedBy,
     Instant createdAt,
-    Instant reviewedAt
+    Instant reviewedAt,
+    String sourceTraceId,
+    BigDecimal confidence
 ) {
     public enum CandidateStatus {
         PENDING,    // 待审核
         APPROVED,   // 已批准
         REJECTED    // 已拒绝
+    }
+
+    /**
+     * 别名方法，兼容 candidateType() 调用
+     */
+    public CandidateType candidateType() {
+        return type;
+    }
+
+    /**
+     * 判断候选是否可以被应用
+     */
+    public boolean canApply() {
+        return status == CandidateStatus.APPROVED;
     }
 }

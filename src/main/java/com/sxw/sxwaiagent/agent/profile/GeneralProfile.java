@@ -28,7 +28,7 @@ public class GeneralProfile implements AgentProfile {
                "Thought: 执行 [工具名]."  (one line only)
             4. After the final tool result, give a brief summary (2-4 sentences). 
                Do NOT repeat raw tool output.
-            5. When the task is complete, call the `terminate` tool to end the session.
+            5. When the task is complete, provide a brief concluding message.
             6. If a tool fails, briefly note the failure and try an alternative approach 
                if possible. Do not get stuck in infinite loops.
             
@@ -47,7 +47,9 @@ public class GeneralProfile implements AgentProfile {
     
     @Override
     public List<String> enabledToolNames() {
-        // GeneralProfile 允许使用所有工具（使用实际的 @Tool 方法名）
+        // GeneralProfile 允许使用读写工具（最高 LOCAL_WRITE 风险等级）
+        // 注意：executeTerminalCommand (SHELL) 和 doTerminate (DESTRUCTIVE) 超出 localWrite 策略，
+        // 不应包含在此列表中，否则会被 ToolRiskEvaluator 拒绝。
         return List.of(
                 "searchRagFlow",
                 "searchWeb",
@@ -56,7 +58,6 @@ public class GeneralProfile implements AgentProfile {
                 "generatePDF",
                 "readFile",
                 "writeFile",
-                "executeTerminalCommand",
                 "createNote",
                 "appendNote",
                 "readNote",
@@ -64,8 +65,7 @@ public class GeneralProfile implements AgentProfile {
                 "searchNotes",
                 "deleteNote",
                 "listSkills",
-                "loadSkill",
-                "doTerminate"
+                "loadSkill"
         );
     }
     

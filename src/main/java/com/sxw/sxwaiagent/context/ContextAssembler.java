@@ -27,11 +27,12 @@ public class ContextAssembler {
     private final ContextCompressor compressor;
     private final TokenCounter tokenCounter;
     
-    public ContextAssembler(ContextCompressor compressor, TokenCounter tokenCounter) {
-        this.budget = ContextBudget.defaultBudget();
+    public ContextAssembler(ContextBudget budget, ContextCompressor compressor, TokenCounter tokenCounter) {
+        this.budget = budget;
         this.compressor = compressor;
         this.tokenCounter = tokenCounter;
-        log.info("ContextAssembler initialized with budget: available={} tokens", budget.availableTokens());
+        log.info("ContextAssembler initialized with budget: available={} tokens (maxInput={}, reservedOutput={})",
+                budget.availableTokens(), budget.maxInputTokens(), budget.reservedOutputTokens());
     }
     
     /**

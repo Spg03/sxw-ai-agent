@@ -3,7 +3,6 @@ package com.sxw.sxwaiagent.agent.hermes;
 import com.sxw.sxwaiagent.infrastructure.advisor.MyLoggerAdvisor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -22,8 +21,8 @@ public class HermesAgent {
 
     private final ChatClient chatClient;
 
-    public HermesAgent(@Qualifier("dashscopeChatModel") ChatModel dashscopeChatModel) {
-        this.chatClient = ChatClient.builder(dashscopeChatModel)
+    public HermesAgent(ChatModel chatModel) {
+        this.chatClient = ChatClient.builder(chatModel)
                 .defaultSystem(SYSTEM_PROMPT)
                 .defaultAdvisors(new MyLoggerAdvisor())
                 .build();

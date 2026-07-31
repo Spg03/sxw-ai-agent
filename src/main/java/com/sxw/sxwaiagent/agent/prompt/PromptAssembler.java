@@ -79,7 +79,7 @@ public class PromptAssembler {
         sections.add(buildProfileContextSection(profile));
         
         // 记忆相关
-        if (profile.memoryPolicy() != null && !profile.memoryPolicy().enabledTypes().isEmpty()) {
+        if (profile.memoryPolicy() != null && profile.memoryPolicy().enabled()) {
             sections.add(buildMemoryIndexSection());
             
             // 如果有用户问题，加载相关记忆详情
@@ -89,13 +89,18 @@ public class PromptAssembler {
         }
         
         // 知识检索结果
-        if (context.knowledgeResult() != null && !context.knowledgeResult().chunks().isEmpty()) {
-            sections.add(buildKnowledgeSection(context.knowledgeResult()));
+        Object kr = context.metadata().get("knowledgeResult");
+        if (kr instanceof KnowledgeRetrievalResult knowledgeResult && !knowledgeResult.chunks().isEmpty()) {
+            sections.add(buildKnowledgeSection(knowledgeResult));
         }
         
         // 工具调用结果
-        if (context.toolResults() != null && !context.toolResults().isEmpty()) {
-            sections.add(buildToolResultsSection(context.toolResults()));
+        Object tr = context.metadata().get("toolResults");
+        if (tr instanceof List<?> toolResultsList && !toolResultsList.isEmpty()) {
+            @SuppressWarnings("unchecked")
+            List<com.sxw.sxwaiagent.agent.tool.ToolResult> toolResults =
+                (List<com.sxw.sxwaiagent.agent.tool.ToolResult>) tr;
+            sections.add(buildToolResultsSection(toolResults));
         }
         
         // 按顺序排序
@@ -225,7 +230,7 @@ public class PromptAssembler {
      */
     private PromptSection buildMemoryIndexSection() {
         try {
-            String indexText = memoryService.getMemoryIndexText();
+            String indexText = memoryService.getIndexText();
             
             if (indexText == null || indexText.isBlank()) {
                 return PromptSection.dynamicSection("MEMORY_INDEX", "", ORDER_MEMORY_INDEX);
@@ -249,13 +254,11 @@ public class PromptAssembler {
      */
     private PromptSection buildSelectedMemoriesSection(String userQuestion) {
         try {
-            var memories = memoryService.selectRelevantMemories(userQuestion, 3);
+            String detailText = memoryService.getRelevantDetailText(userQuestion);
             
-            if (memories.isEmpty()) {
+            if (detailText == null || detailText.isBlank()) {
                 return PromptSection.dynamicSection("SELECTED_MEMORIES", "", ORDER_SELECTED_MEMORIES);
             }
-            
-            String detailText = memoryService.getMemoryDetailText(memories);
             
             String content = String.format("""
                 # Relevant Memory Details
@@ -282,7 +285,7 @@ public class PromptAssembler {
         sb.append("# Retrieved Knowledge\n\n");
         
         for (var chunk : result.chunks()) {
-            sb.append("## ").append(chunk.title()).append("\n");
+            sb.append("## ").append(chunk.documentName()).append("\n");
             sb.append(chunk.content()).append("\n\n");
         }
         
@@ -301,8 +304,8 @@ public class PromptAssembler {
         sb.append("# Tool Call Results\n\n");
         
         for (var result : results) {
-            sb.append("## Tool: ").append(result.toolName()).append("\n");
-            sb.append("Result: ").append(result.result()).append("\n\n");
+            sb.append("Result: ").append(result.content()).append("\n");
+            sb.append("Success: ").append(result.success()).append("\n\n");
         }
         
         return PromptSection.dynamicSection("TOOL_RESULTS", sb.toString(), ORDER_TOOL_RESULTS);

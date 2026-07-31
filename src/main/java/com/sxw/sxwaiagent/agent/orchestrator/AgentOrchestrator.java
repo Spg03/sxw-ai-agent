@@ -10,7 +10,10 @@ import com.sxw.sxwaiagent.agent.runtime.LegacyReActRuntime;
 import com.sxw.sxwaiagent.agent.runtime.ToolUseLoopRuntime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -34,6 +37,7 @@ public class AgentOrchestrator {
     private final Map<AgentProfileCode, AgentProfile> profileMap;
     private final Map<AgentProfileCode, AgentRuntime> runtimeMap;
     private final RequestGuard requestGuard;
+    private final ChatMemory chatMemory;
     
     // 保存两种 Runtime 的引用，支持动态切换
     private final AgentRuntime legacyRuntime;
@@ -42,7 +46,8 @@ public class AgentOrchestrator {
     public AgentOrchestrator(
             List<AgentProfile> profiles,
             List<AgentRuntime> runtimes,
-            RequestGuard requestGuard
+            RequestGuard requestGuard,
+            ChatMemory agentChatMemory
     ) {
         this.profileMap = new EnumMap<>(AgentProfileCode.class);
         for (AgentProfile profile : profiles) {
@@ -75,6 +80,7 @@ public class AgentOrchestrator {
         }
         
         this.requestGuard = requestGuard;
+        this.chatMemory = agentChatMemory;
         
         log.info("AgentOrchestrator initialized with {} profiles, {} runtime assignments",
                 profileMap.size(), runtimeMap.size());
@@ -108,19 +114,25 @@ public class AgentOrchestrator {
         log.info("[{}] Using runtime: {} for profile: {}", 
                 requestId, runtime.getClass().getSimpleName(), request.profile());
         
-        // 4. 构建 AgentContext
+        // 4. 从 ChatMemory 加载历史消息
+        List<Message> history = loadHistory(request.chatId(), requestId);
+        
+        // 5. 构建 AgentContext
         AgentContext context = AgentContext.builder()
                 .requestId(requestId)
                 .traceId(traceId)
                 .chatId(request.chatId())
                 .profile(profile)
                 .userMessage(request.message())
-                .history(List.of()) // TODO: 从 ChatMemory 加载历史
+                .history(history)
                 .metadata(request.metadata())
                 .build();
         
-        // 5. 执行
+        // 6. 执行
         AgentResponse response = runtime.execute(context);
+        
+        // 7. 保存用户消息和 Agent 回复到 ChatMemory
+        saveMessages(request.chatId(), request.message(), response.answer(), requestId);
         
         long latencyMs = System.currentTimeMillis() - startTime;
         log.info("[{}] Request completed in {}ms using {}", requestId, latencyMs, runtime.getClass().getSimpleName());
@@ -167,6 +179,48 @@ public class AgentOrchestrator {
             assignments.put(entry.getKey(), entry.getValue().getClass().getSimpleName());
         }
         return Collections.unmodifiableMap(assignments);
+    }
+    
+    /**
+     * 从 ChatMemory 加载历史消息
+     * <p>
+     * chatId 为空或首次对话时返回空列表，不影响正常流程。
+     */
+    private List<Message> loadHistory(String chatId, String requestId) {
+        if (chatId == null || chatId.isBlank()) {
+            log.debug("[{}] No chatId provided, skipping history load", requestId);
+            return List.of();
+        }
+        try {
+            List<Message> history = chatMemory.get(chatId);
+            log.info("[{}] Loaded {} history messages for chatId={}", requestId, history.size(), chatId);
+            return history;
+        } catch (Exception e) {
+            log.warn("[{}] Failed to load history for chatId={}, using empty history: {}",
+                    requestId, chatId, e.getMessage());
+            return List.of();
+        }
+    }
+    
+    /**
+     * 保存用户消息和 Agent 回复到 ChatMemory
+     */
+    private void saveMessages(String chatId, String userMessage, String assistantAnswer, String requestId) {
+        if (chatId == null || chatId.isBlank()) {
+            return;
+        }
+        try {
+            List<Message> messages = new ArrayList<>();
+            messages.add(new UserMessage(userMessage));
+            if (assistantAnswer != null && !assistantAnswer.isBlank()) {
+                messages.add(new AssistantMessage(assistantAnswer));
+            }
+            chatMemory.add(chatId, messages);
+            log.debug("[{}] Saved {} messages to ChatMemory for chatId={}", requestId, messages.size(), chatId);
+        } catch (Exception e) {
+            log.warn("[{}] Failed to save messages for chatId={}: {}",
+                    requestId, chatId, e.getMessage());
+        }
     }
     
     private AgentRuntime findRuntime(List<AgentRuntime> runtimes, String name) {

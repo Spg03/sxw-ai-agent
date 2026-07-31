@@ -15,9 +15,11 @@ public class HermesCandidateService {
     private static final Logger log = LoggerFactory.getLogger(HermesCandidateService.class);
     
     private final HermesCandidateRepository repository;
+    private final HermesApplier hermesApplier;
     
-    public HermesCandidateService(HermesCandidateRepository repository) {
+    public HermesCandidateService(HermesCandidateRepository repository, HermesApplier hermesApplier) {
         this.repository = repository;
+        this.hermesApplier = hermesApplier;
     }
     
     public HermesCandidate createCandidate(
@@ -39,7 +41,9 @@ public class HermesCandidateService {
             HermesCandidate.CandidateStatus.PENDING,
             null,
             Instant.now(),
-            null
+            null,
+            runId,   // sourceTraceId
+            null     // confidence
         );
         
         repository.save(candidate);
@@ -72,12 +76,29 @@ public class HermesCandidateService {
         repository.updateStatus(candidateId, HermesCandidate.CandidateStatus.APPROVED, reviewedBy);
         log.info("Approved candidate {} by {}", candidateId, reviewedBy);
         
-        // TODO: Apply approved candidate to appropriate system
-        // - MEMORY -> MemoryService
-        // - KNOWLEDGE -> KnowledgeService
-        // - EVAL_CASE -> EvalCaseService
-        // - PROMPT_HINT -> PromptService
-        // - TOOL_PATTERN -> ToolRegistry
+        // 直接用内存中的 candidate 构建 APPROVED 副本给 applier，无需二次查询
+        HermesCandidate approvedCandidate = new HermesCandidate(
+            candidate.candidateId(),
+            candidate.runId(),
+            candidate.chatId(),
+            candidate.type(),
+            candidate.title(),
+            candidate.content(),
+            candidate.metadata(),
+            HermesCandidate.CandidateStatus.APPROVED,
+            reviewedBy,
+            candidate.createdAt(),
+            Instant.now(),
+            candidate.sourceTraceId(),
+            candidate.confidence()
+        );
+        try {
+            String result = hermesApplier.apply(approvedCandidate);
+            log.info("Applied candidate {}: {}", candidateId, result);
+        } catch (Exception e) {
+            log.error("Failed to apply candidate {} after approval: {}", candidateId, e.getMessage(), e);
+            // Approval succeeded, apply failed — do not block the approval
+        }
         
         return true;
     }
