@@ -6,6 +6,11 @@ tmp
 logs
 data
 
+# Tool-generated directories (Claude Code / Qoder / decompiled classes)
+.claude/
+.qoder/
+org/
+
 # Frontend build output
 frontend/dist/
 frontend/node_modules/
