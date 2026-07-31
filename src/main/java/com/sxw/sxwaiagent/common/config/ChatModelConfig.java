@@ -1,5 +1,7 @@
 package com.sxw.sxwaiagent.common.config;
 
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatModel;
@@ -16,6 +18,7 @@ import reactor.core.publisher.Flux;
  * <p>
  * dashscopeChatModel 为主模型，ollamaChatModel 为降级备选。
  * 注册一个 @Primary 的 FallbackChatModel，所有注入点自动获得降级能力。
+ * Ollama 调用前检查 CircuitBreaker 状态，CB open 时直接走 fallback 逻辑。
  */
 @Configuration
 public class ChatModelConfig {
@@ -26,14 +29,17 @@ public class ChatModelConfig {
     @Primary
     public ChatModel fallbackChatModel(
             @Qualifier("dashscopeChatModel") ChatModel primary,
-            @Qualifier("ollamaChatModel") ChatModel fallback
+            @Qualifier("ollamaChatModel") ChatModel fallback,
+            CircuitBreakerRegistry circuitBreakerRegistry
     ) {
-        log.info("FallbackChatModel initialized: primary=dashscope, fallback=ollama");
-        return new FallbackChatModel(primary, fallback);
+        CircuitBreaker ollamaCb = circuitBreakerRegistry.circuitBreaker("ollama");
+        log.info("FallbackChatModel initialized: primary=dashscope, fallback=ollama (CB protected)");
+        return new FallbackChatModel(primary, fallback, ollamaCb);
     }
 
     /**
      * 主备切换 ChatModel：优先使用 primary，失败时自动降级到 fallback。
+     * Ollama fallback 受 CircuitBreaker 保护：CB open 时跳过 ollama 直接返回错误。
      */
     static class FallbackChatModel implements ChatModel {
 
@@ -41,10 +47,12 @@ public class ChatModelConfig {
 
         private final ChatModel primary;
         private final ChatModel fallback;
+        private final CircuitBreaker ollamaCb;
 
-        FallbackChatModel(ChatModel primary, ChatModel fallback) {
+        FallbackChatModel(ChatModel primary, ChatModel fallback, CircuitBreaker ollamaCb) {
             this.primary = primary;
             this.fallback = fallback;
+            this.ollamaCb = ollamaCb;
         }
 
         @Override
@@ -53,7 +61,7 @@ public class ChatModelConfig {
                 return primary.call(prompt);
             } catch (Exception e) {
                 log.warn("Primary ChatModel (dashscope) failed: {}, falling back to ollama", e.getMessage());
-                return fallback.call(prompt);
+                return callOllamaWithCb(prompt);
             }
         }
 
@@ -64,13 +72,37 @@ public class ChatModelConfig {
                         .onErrorResume(e -> {
                             log.warn("Primary ChatModel (dashscope) stream failed: {}, falling back to ollama",
                                     e.getMessage());
-                            return fallback.stream(prompt);
+                            return streamOllamaWithCb(prompt);
                         });
             } catch (Exception e) {
                 log.warn("Primary ChatModel (dashscope) stream setup failed: {}, falling back to ollama",
                         e.getMessage());
-                return fallback.stream(prompt);
+                return streamOllamaWithCb(prompt);
             }
+        }
+
+        private ChatResponse callOllamaWithCb(Prompt prompt) {
+            if (ollamaCb.getState() == CircuitBreaker.State.OPEN
+                    || ollamaCb.getState() == CircuitBreaker.State.FORCED_OPEN) {
+                log.warn("Ollama CircuitBreaker is OPEN, skipping fallback");
+                throw new IllegalStateException("Ollama fallback unavailable (circuit breaker open)");
+            }
+            try {
+                return fallback.call(prompt);
+            } catch (Exception ex) {
+                ollamaCb.onError(0, java.util.concurrent.TimeUnit.MILLISECONDS, ex);
+                throw ex;
+            }
+        }
+
+        private Flux<ChatResponse> streamOllamaWithCb(Prompt prompt) {
+            if (ollamaCb.getState() == CircuitBreaker.State.OPEN
+                    || ollamaCb.getState() == CircuitBreaker.State.FORCED_OPEN) {
+                log.warn("Ollama CircuitBreaker is OPEN, skipping fallback stream");
+                return Flux.error(new IllegalStateException("Ollama fallback unavailable (circuit breaker open)"));
+            }
+            return fallback.stream(prompt)
+                    .doOnError(ex -> ollamaCb.onError(0, java.util.concurrent.TimeUnit.MILLISECONDS, ex));
         }
     }
 }

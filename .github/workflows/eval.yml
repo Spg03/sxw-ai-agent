@@ -38,8 +38,12 @@ jobs:
           SEARCH_API_KEY: ${{ secrets.SEARCH_API_KEY }}
         run: |
           if [ -z "$DASHSCOPE_API_KEY" ]; then
-            echo "::warning::DASHSCOPE_API_KEY secret is not set; skipping eval."
-            exit 0
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "::warning::DASHSCOPE_API_KEY not set; skipping eval for PR trigger."
+              exit 0
+            fi
+            echo "::error::DASHSCOPE_API_KEY secret is required for schedule/manual eval but is not set."
+            exit 1
           fi
           mvn -B -ntp test -Dgroups=eval -Dtest=LoveAppEvalSuiteTest
 

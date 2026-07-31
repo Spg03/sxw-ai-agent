@@ -5,6 +5,8 @@ import com.sxw.sxwaiagent.common.api.Result;
 import com.sxw.sxwaiagent.treehole.TreeholeService;
 import com.sxw.sxwaiagent.treehole.dto.CreateTreeholeRequest;
 import com.sxw.sxwaiagent.treehole.dto.TreeholeResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -17,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+@Tag(name = "树洞", description = "用户私密树洞记录的创建、查询与删除")
 @RestController
 @RequestMapping("/treeholes")
 public class TreeholeController {
@@ -27,22 +30,26 @@ public class TreeholeController {
         this.treeholeService = treeholeService;
     }
 
+    @Operation(summary = "创建树洞记录")
     @PostMapping
     public Result<TreeholeResponse> create(Authentication authentication,
                                            @Valid @RequestBody CreateTreeholeRequest request) {
         return Result.ok(treeholeService.create(currentUser(authentication).userId(), request));
     }
 
+    @Operation(summary = "列出我的树洞记录")
     @GetMapping
     public Result<List<TreeholeResponse>> list(Authentication authentication) {
         return Result.ok(treeholeService.list(currentUser(authentication).userId()));
     }
 
+    @Operation(summary = "获取树洞记录详情")
     @GetMapping("/{id}")
     public Result<TreeholeResponse> get(Authentication authentication, @PathVariable Long id) {
         return Result.ok(treeholeService.get(currentUser(authentication).userId(), id));
     }
 
+    @Operation(summary = "删除树洞记录")
     @DeleteMapping("/{id}")
     public Result<Void> delete(Authentication authentication, @PathVariable Long id) {
         treeholeService.delete(currentUser(authentication).userId(), id);

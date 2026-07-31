@@ -5,11 +5,14 @@ import com.sxw.sxwaiagent.infrastructure.skill.NoteSkill;
 import com.sxw.sxwaiagent.treehole.repository.TreeholeEntryRepository;
 import com.sxw.sxwaiagent.evaluation.EvalCaseRepository;
 import com.sxw.sxwaiagent.evaluation.EvalRunRepository;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.Data;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@Tag(name = "仪表盘", description = "系统统计概览与健康检查")
 @RestController
 @RequestMapping("/api/dashboard")
 public class DashboardController {
@@ -40,6 +43,7 @@ public class DashboardController {
         private long evalCaseCount;
     }
 
+    @Operation(summary = "获取系统统计数据", description = "返回对话数、树洞数、笔记数、评测运行数等统计")
     @GetMapping("/stats")
     public Result<DashboardStats> getStats() {
         DashboardStats stats = new DashboardStats();
@@ -59,6 +63,7 @@ public class DashboardController {
         return Result.ok(stats);
     }
 
+    @Operation(summary = "健康检查")
     @GetMapping("/health")
     public Result<String> healthCheck() {
         return Result.ok("ok");

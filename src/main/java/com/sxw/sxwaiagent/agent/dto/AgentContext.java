@@ -1,6 +1,7 @@
 package com.sxw.sxwaiagent.agent.dto;
 
 import com.sxw.sxwaiagent.agent.profile.AgentProfile;
+import com.sxw.sxwaiagent.plan.AgentRunMode;
 import org.springframework.ai.chat.messages.Message;
 
 import java.util.List;
@@ -18,6 +19,8 @@ import java.util.Map;
  * @param userMessage 用户消息
  * @param history   历史消息列表
  * @param metadata  元数据
+ * @param runMode   运行模式（默认 CHAT）
+ * @param planId    关联的计划 ID（EXECUTE 模式下使用）
  */
 public record AgentContext(
         String requestId,
@@ -26,7 +29,9 @@ public record AgentContext(
         AgentProfile profile,
         String userMessage,
         List<Message> history,
-        Map<String, Object> metadata
+        Map<String, Object> metadata,
+        AgentRunMode runMode,
+        String planId
 ) {
     
     /**
@@ -44,6 +49,8 @@ public record AgentContext(
         private String userMessage;
         private List<Message> history = List.of();
         private Map<String, Object> metadata = Map.of();
+        private AgentRunMode runMode = AgentRunMode.CHAT;
+        private String planId;
         
         public Builder requestId(String requestId) {
             this.requestId = requestId;
@@ -80,8 +87,18 @@ public record AgentContext(
             return this;
         }
         
+        public Builder runMode(AgentRunMode runMode) {
+            this.runMode = runMode;
+            return this;
+        }
+        
+        public Builder planId(String planId) {
+            this.planId = planId;
+            return this;
+        }
+        
         public AgentContext build() {
-            return new AgentContext(requestId, traceId, chatId, profile, userMessage, history, metadata);
+            return new AgentContext(requestId, traceId, chatId, profile, userMessage, history, metadata, runMode, planId);
         }
     }
 }

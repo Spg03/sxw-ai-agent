@@ -7,9 +7,13 @@ import com.sxw.sxwaiagent.agent.profile.AgentProfile;
 import com.sxw.sxwaiagent.agent.prompt.AssembledPrompt;
 import com.sxw.sxwaiagent.agent.prompt.PromptAssembler;
 import com.sxw.sxwaiagent.agent.prompt.PromptRunRecorder;
+import com.sxw.sxwaiagent.agent.tool.ToolDefinition;
 import com.sxw.sxwaiagent.agent.tool.ToolExecutor;
+import com.sxw.sxwaiagent.agent.tool.ToolRegistry;
 import com.sxw.sxwaiagent.agent.tool.ToolResult;
 import com.sxw.sxwaiagent.common.web.ClientAbortDetector;
+import com.sxw.sxwaiagent.plan.AgentRunMode;
+import com.sxw.sxwaiagent.plan.PlanReviewService;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -82,6 +86,8 @@ public class ToolUseLoopRuntime implements AgentRuntime {
     private final Executor agentTaskExecutor;
     private final Retry retry;
     private final CircuitBreaker circuitBreaker;
+    private final PlanReviewService planReviewService;
+    private final ToolRegistry toolRegistry;
     
     @Value("${sxw.agent.runtime.max-turns:10}")
     private int maxTurns;
@@ -100,7 +106,9 @@ public class ToolUseLoopRuntime implements AgentRuntime {
             PromptRunRecorder promptRunRecorder,
             @Qualifier("agentTaskExecutor") Executor agentTaskExecutor,
             RetryRegistry retryRegistry,
-            CircuitBreakerRegistry circuitBreakerRegistry
+            CircuitBreakerRegistry circuitBreakerRegistry,
+            PlanReviewService planReviewService,
+            ToolRegistry toolRegistry
     ) {
         this.chatModel = chatModel;
         this.toolExecutor = toolExecutor;
@@ -110,6 +118,8 @@ public class ToolUseLoopRuntime implements AgentRuntime {
         this.agentTaskExecutor = agentTaskExecutor;
         this.retry = retryRegistry.retry(RESILIENCE_INSTANCE);
         this.circuitBreaker = circuitBreakerRegistry.circuitBreaker(RESILIENCE_INSTANCE);
+        this.planReviewService = planReviewService;
+        this.toolRegistry = toolRegistry;
     }
     
     @Override
@@ -197,6 +207,19 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                                 toolCall.name(),
                                 toolCall.arguments(),
                                 "Error: Tool " + toolCall.name() + " is not available for this profile."
+                        ));
+                        continue;
+                    }
+                    
+                    // 检查 runMode 是否允许该工具执行
+                    String runModeReject = checkRunModeAllowed(toolCall.name(), context);
+                    if (runModeReject != null) {
+                        log.warn("[{}] Tool {} rejected by runMode {}: {}",
+                                context.requestId(), toolCall.name(), context.runMode(), runModeReject);
+                        toolCalls.add(new AgentResponse.ToolCallInfo(
+                                toolCall.name(),
+                                toolCall.arguments(),
+                                runModeReject
                         ));
                         continue;
                     }
@@ -398,6 +421,17 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                             continue;
                         }
                         
+                        // 检查 runMode 是否允许该工具执行
+                        String runModeReject = checkRunModeAllowed(toolCall.name(), context);
+                        if (runModeReject != null) {
+                            log.warn("[{}] Stream tool {} rejected by runMode {}: {}",
+                                    context.requestId(), toolCall.name(), context.runMode(), runModeReject);
+                            toolCalls.add(new AgentResponse.ToolCallInfo(
+                                    toolCall.name(), toolCall.arguments(), runModeReject
+                            ));
+                            continue;
+                        }
+                        
                         ToolResult toolResult = toolExecutor.execute(
                                 toolCall.name(), toolCall.arguments(),
                                 context.requestId(), context.traceId(), turn, profile
@@ -511,6 +545,42 @@ public class ToolUseLoopRuntime implements AgentRuntime {
     }
     
     // ───────────────────────── Resilience helpers ─────────────────────────
+    
+    /**
+     * 检查 runMode 是否允许指定工具执行
+     *
+     * @param toolName 工具名称
+     * @param context  Agent 上下文
+     * @return null 表示允许，非 null 表示拒绝原因
+     */
+    private String checkRunModeAllowed(String toolName, AgentContext context) {
+        AgentRunMode runMode = context.runMode() != null ? context.runMode() : AgentRunMode.CHAT;
+        
+        switch (runMode) {
+            case PLAN:
+                // PLAN 模式：只允许 READ_ONLY 工具
+                ToolDefinition toolDef = toolRegistry.get(toolName).orElse(null);
+                if (toolDef == null || toolDef.riskLevel() != com.sxw.sxwaiagent.agent.profile.ToolRiskLevel.READ_ONLY) {
+                    return "当前处于规划模式，仅允许只读工具（如 searchRagFlow, readFile, listNotes 等），工具 " + toolName + " 不可用。";
+                }
+                return null;
+                
+            case EXECUTE:
+                // EXECUTE 模式：检查关联的 Plan 是否已批准
+                if (context.planId() == null || context.planId().isEmpty()) {
+                    return "当前处于执行模式，但未关联计划 ID，请先创建并批准计划。";
+                }
+                if (!planReviewService.isPlanApproved(context.planId())) {
+                    return "计划 " + context.planId() + " 尚未获得批准，无法在执行模式下运行。";
+                }
+                return null;
+                
+            case CHAT:
+            default:
+                // CHAT 模式：正常执行，无额外限制
+                return null;
+        }
+    }
     
     /**
      * 弹性同步 LLM 调用：超时 → Retry → CircuitBreaker
@@ -711,6 +781,8 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                 .userMessage(original.userMessage())
                 .history(original.history())
                 .metadata(metadata)
+                .runMode(original.runMode())
+                .planId(original.planId())
                 .build();
     }
     

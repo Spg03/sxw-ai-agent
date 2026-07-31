@@ -133,6 +133,23 @@ Content-Type: application/json
 - **监控**：Micrometer + Prometheus + Agent Trace
 - **文档**：Knife4j (OpenAPI 3)
 
+## 核心边界（Core Boundaries）
+
+以下声明当前项目的核心源码边界，供 coding agent 的热点分析、风险路由和变更影响评估使用：
+
+**核心路径（仅这些目录包含当前活跃源码）：**
+- `src/main/java/com/sxw/sxwaiagent/` — 后端 Java 源码
+- `src/test/java/com/sxw/sxwaiagent/` — 后端测试
+- `frontend/src/` — 前端 React 源码
+- `.github/workflows/` — CI/CD 工作流
+- `src/main/resources/` — 配置与迁移脚本
+
+**排除路径（历史遗留，不属于当前项目）：**
+- `com/yupi/yuaiagent/` — 前身教学项目，已迁移离场
+- `yu-ai-agent-frontend/` — 前身前端，已迁移离场
+- `yu-image-search-mcp-server/` — 前身 MCP 服务，已迁移离场
+- `org/springframework/` — 反编译 class 文件，非源码
+
 ## 参考资源
 
 - [JavaGuide - Agent Harness 工程化](https://javaguide.cn/ai/agent/harness-engineering.html)

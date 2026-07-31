@@ -9,6 +9,8 @@ import com.sxw.sxwaiagent.agent.profile.AgentProfile;
 import com.sxw.sxwaiagent.agent.profile.AgentProfileCode;
 import com.sxw.sxwaiagent.agent.runtime.ToolUseLoopRuntime;
 import com.sxw.sxwaiagent.common.api.Result;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -29,6 +31,7 @@ import java.util.Map;
  * 提供统一的 Agent 入口，支持通过 profile 参数选择不同的 Agent 模式。
  * 同时保留向后兼容的旧接口。
  */
+@Tag(name = "Agent 对话", description = "统一 Agent 入口，支持多 Profile、流式响应和对话管理")
 @RestController
 @RequestMapping("/api/agent")
 @Validated

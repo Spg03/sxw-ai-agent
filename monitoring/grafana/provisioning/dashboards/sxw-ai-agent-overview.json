@@ -1,0 +1,197 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "HTTP 请求速率 (req/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"sxw-ai-agent\"}[1m]))",
+          "legendFormat": "Total"
+        },
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"sxw-ai-agent\", status=~\"5..\"}[1m]))",
+          "legendFormat": "5xx"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "HTTP 延迟 P95 / P99",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"sxw-ai-agent\"}[5m])) by (le))",
+          "legendFormat": "P95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=\"sxw-ai-agent\"}[5m])) by (le))",
+          "legendFormat": "P99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "JVM 堆内存使用",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "jvm_memory_used_bytes{application=\"sxw-ai-agent\", area=\"heap\"}",
+          "legendFormat": "{{id}}"
+        },
+        {
+          "expr": "jvm_memory_max_bytes{application=\"sxw-ai-agent\", area=\"heap\"}",
+          "legendFormat": "Max"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "bytes" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "JVM GC 暂停时间",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(jvm_gc_pause_seconds_sum{application=\"sxw-ai-agent\"}[1m])",
+          "legendFormat": "{{action}} {{cause}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Circuit Breaker 状态",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "resilience4j_circuitbreaker_state{application=\"sxw-ai-agent\"}",
+          "legendFormat": "{{name}} [{{state}}]"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "text": "CLOSED" }, "1": { "text": "OPEN" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Circuit Breaker 失败率",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "resilience4j_circuitbreaker_failure_rate{application=\"sxw-ai-agent\"}",
+          "legendFormat": "{{name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "max": 100 },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Retry 调用统计",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(resilience4j_retry_calls_total{application=\"sxw-ai-agent\"}[1m])",
+          "legendFormat": "{{name}} [{{kind}}]"
+        }
+      ]
+    },
+    {
+      "title": "Rate Limiter 可用许可",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "resilience4j_ratelimiter_available_permissions{application=\"sxw-ai-agent\"}",
+          "legendFormat": "{{name}}"
+        }
+      ]
+    },
+    {
+      "title": "JVM 线程数",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "jvm_threads_live_threads{application=\"sxw-ai-agent\"}",
+          "legendFormat": "Live"
+        },
+        {
+          "expr": "jvm_threads_peak_threads{application=\"sxw-ai-agent\"}",
+          "legendFormat": "Peak"
+        }
+      ]
+    },
+    {
+      "title": "系统 CPU 使用率",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "system_cpu_usage{application=\"sxw-ai-agent\"}",
+          "legendFormat": "System"
+        },
+        {
+          "expr": "process_cpu_usage{application=\"sxw-ai-agent\"}",
+          "legendFormat": "Process"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "max": 1 },
+        "overrides": []
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["sxw-ai-agent", "spring-boot"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "SXW AI Agent Overview",
+  "uid": "sxw-ai-agent-overview",
+  "version": 1
+}

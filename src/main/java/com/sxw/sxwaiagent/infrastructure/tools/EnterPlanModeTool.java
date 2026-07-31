@@ -1,5 +1,7 @@
 package com.sxw.sxwaiagent.infrastructure.tools;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxw.sxwaiagent.plan.AgentRunMode;
 import com.sxw.sxwaiagent.plan.Plan;
 import com.sxw.sxwaiagent.plan.PlanReviewService;
@@ -10,6 +12,7 @@ import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class EnterPlanModeTool {
@@ -17,9 +20,11 @@ public class EnterPlanModeTool {
     private static final Logger log = LoggerFactory.getLogger(EnterPlanModeTool.class);
     
     private final PlanReviewService planReviewService;
+    private final ObjectMapper objectMapper;
     
     public EnterPlanModeTool(PlanReviewService planReviewService) {
         this.planReviewService = planReviewService;
+        this.objectMapper = new ObjectMapper();
     }
     
     @Tool(description = """
@@ -71,10 +76,24 @@ public class EnterPlanModeTool {
     }
     
     private List<Plan.PlanStep> parseSteps(String stepsJson) {
-        // Simple JSON parsing - in production, use Jackson or similar
-        // For now, return a default step
-        return List.of(
-            new Plan.PlanStep(1, "执行任务", null, Plan.StepStatus.PENDING)
-        );
+        try {
+            List<Map<String, Object>> rawSteps = objectMapper.readValue(
+                stepsJson,
+                new TypeReference<List<Map<String, Object>>>() {}
+            );
+            
+            return rawSteps.stream()
+                .map(m -> new Plan.PlanStep(
+                    m.get("stepIndex") != null ? ((Number) m.get("stepIndex")).intValue() : 0,
+                    (String) m.getOrDefault("description", ""),
+                    (String) m.get("toolName"),
+                    Plan.StepStatus.PENDING
+                ))
+                .toList();
+        } catch (Exception e) {
+            log.warn("Failed to parse steps JSON, using fallback: {}", e.getMessage());
+            // Fallback: treat entire string as a single step description
+            return List.of(new Plan.PlanStep(1, stepsJson, null, Plan.StepStatus.PENDING));
+        }
     }
 }

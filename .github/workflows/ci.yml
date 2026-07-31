@@ -29,8 +29,19 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Build & test (eval suite excluded by default)
-        run: mvn -B -ntp verify
+      - name: Build & test (eval suite excluded by default, JaCoCo coverage check)
+        run: mvn -B -ntp verify -Ddependency-check.skip=true
+
+      - name: OWASP dependency scan (non-blocking)
+        continue-on-error: true
+        run: mvn -B -ntp dependency-check:check
+
+      - name: Upload JaCoCo Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
 
       - name: Upload Surefire reports on failure
         if: failure()
@@ -39,9 +50,34 @@ jobs:
           name: surefire-reports
           path: target/surefire-reports/
 
+  frontend:
+    name: Frontend Lint & Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
   docker:
     name: Build & Push Docker Image
-    needs: test
+    needs: [test, frontend]
     runs-on: ubuntu-latest
     # 只有 push 到默认分支才发布镜像；PR 仅构建验证
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
@@ -83,7 +119,7 @@ jobs:
 
   pr-docker-build-only:
     name: Verify Docker Build (PR)
-    needs: test
+    needs: [test, frontend]
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:

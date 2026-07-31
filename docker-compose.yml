@@ -20,6 +20,10 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://tempo:4317}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-sxw-ai-agent}
+      OTEL_METRICS_EXPORTER: ${OTEL_METRICS_EXPORTER:-otlp}
+      OTEL_LOGS_EXPORTER: ${OTEL_LOGS_EXPORTER:-otlp}
     volumes:
       - note-data:/data/notes
     depends_on:
@@ -32,12 +36,25 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    networks:
+      - backend
 
   redis:
     image: redis:7-alpine
     container_name: sxw-redis
-    ports:
-      - "6379:6379"
     volumes:
       - redis-data:/data
     restart: unless-stopped
@@ -46,6 +63,91 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    networks:
+      - backend
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring:/etc/prometheus-config
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus-config/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  tempo:
+    image: grafana/tempo:latest
+    ports:
+      - "3200:3200"   # Tempo API
+      - "4317:4317"   # OTLP gRPC
+    volumes:
+      - ./monitoring/tempo.yml:/etc/tempo.yml
+      - tempo-data:/tmp/tempo
+    networks:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki.yml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    networks:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+    networks:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
 
   # 可选：启用 PgVector 时取消注释，并把 application.yml 的 datasource/vectorstore 打开
   # pgvector:
@@ -63,4 +165,12 @@ services:
 volumes:
   note-data:
   redis-data:
+  prometheus-data:
+  grafana-data:
+  tempo-data:
+  loki-data:
   # pgvector-data:
+
+networks:
+  backend:
+    driver: bridge

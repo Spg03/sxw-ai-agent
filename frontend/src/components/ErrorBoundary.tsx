@@ -18,25 +18,18 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('ErrorBoundary caught:', error, info);
+    console.error('ErrorBoundary:', error, info);
   }
 
   render() {
     if (this.state.hasError) {
       return this.props.fallback ?? (
-        <div style={{ padding: '2rem', textAlign: 'center' }}>
-          <h2 style={{ color: '#ef4444', marginBottom: '0.5rem' }}>页面出错了</h2>
-          <p style={{ color: '#6b7280', marginBottom: '1rem' }}>{this.state.error?.message}</p>
+        <div className="flex flex-col items-center justify-center p-8">
+          <h2 className="text-xl font-semibold text-red-500 mb-2">页面出错了</h2>
+          <p className="text-gray-500 mb-4">{this.state.error?.message}</p>
           <button
             onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
-            style={{
-              padding: '0.5rem 1rem',
-              background: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '0.375rem',
-              cursor: 'pointer',
-            }}
+            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
           >
             重试
           </button>

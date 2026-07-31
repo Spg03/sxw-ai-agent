@@ -74,15 +74,15 @@ public class EvalExecutor {
             }
 
             String requestId = "eval-" + UUID.randomUUID().toString().substring(0, 8);
-            AgentContext context = new AgentContext(
-                requestId,
-                "trace-" + requestId,
-                "eval-chat-" + evalCase.caseId(),
-                profile,
-                evalCase.inputPrompt(),
-                List.of(),
-                Map.of("evalCaseId", evalCase.caseId())
-            );
+            AgentContext context = AgentContext.builder()
+                .requestId(requestId)
+                .traceId("trace-" + requestId)
+                .chatId("eval-chat-" + evalCase.caseId())
+                .profile(profile)
+                .userMessage(evalCase.inputPrompt())
+                .history(List.of())
+                .metadata(Map.of("evalCaseId", evalCase.caseId()))
+                .build();
 
             AgentResponse response = runtime.execute(context);
             String actualOutput = response.answer();

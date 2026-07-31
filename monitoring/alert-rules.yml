@@ -1,0 +1,74 @@
+groups:
+  - name: sxw-ai-agent-alerts
+    rules:
+      - alert: CircuitBreakerOpen
+        expr: resilience4j_circuitbreaker_state{state="open"} == 1
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Circuit breaker {{ $labels.name }} is open"
+          description: "熔断器 {{ $labels.name }} 已开启超过 30s，下游服务可能不可用"
+
+      - alert: HighErrorRate
+        expr: rate(http_server_requests_seconds_count{status=~"5.."}[5m]) / rate(http_server_requests_seconds_count[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP 5xx error rate above 5%"
+          description: "当前 5xx 错误率超过 5%，请检查服务日志"
+
+      - alert: RedisDown
+        expr: redis_connections == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis connection is down"
+          description: "Redis 连接数为 0，缓存和会话功能将不可用"
+
+      - alert: HighMemoryUsage
+        expr: jvm_memory_used_bytes{area="heap"} / jvm_memory_max_bytes{area="heap"} > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "JVM heap memory usage above 85%"
+          description: "堆内存使用率超过 85%，可能触发频繁 GC"
+
+      - alert: HighLatencyP99
+        expr: histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[5m])) by (le)) > 5
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP P99 latency above 5s"
+          description: "P99 延迟超过 5 秒，可能存在 LLM 调用超时或资源争用"
+
+      - alert: LLMCircuitBreakerOpen
+        expr: resilience4j_circuitbreaker_state{name="dashscope", state="open"} == 1
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "DashScope LLM circuit breaker is OPEN"
+          description: "DashScope 熔断器开启，所有 LLM 调用将快速失败，请检查 API Key 和网络"
+
+      - alert: RetryStormDetected
+        expr: rate(resilience4j_retry_calls_total{kind="retry"}[1m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High retry rate detected"
+          description: "重试速率超过 10次/秒，可能存在下游服务不稳定"
+
+      - alert: AppDown
+        expr: up{job="sxw-ai-agent"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "sxw-ai-agent instance is down"
+          description: "Prometheus 无法抓取应用指标，服务可能已崩溃"

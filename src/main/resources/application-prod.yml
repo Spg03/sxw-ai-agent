@@ -121,6 +121,12 @@ resilience4j:
         ignore-exceptions:
           - io.github.resilience4j.circuitbreaker.CallNotPermittedException
           - io.github.resilience4j.ratelimiter.RequestNotPermitted
+      ragflow:
+        max-attempts: 2
+        wait-duration: 1s
+      ollama:
+        max-attempts: 1
+        wait-duration: 500ms
   ratelimiter:
     instances:
       dashscope:
@@ -140,6 +146,21 @@ resilience4j:
         permitted-number-of-calls-in-half-open-state: 5
         automatic-transition-from-open-to-half-open-enabled: true
         register-health-indicator: true
+      ragflow:
+        sliding-window-size: 10
+        failure-rate-threshold: 60
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        register-health-indicator: true
+      ollama:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 20s
+        register-health-indicator: true
+  timelimiter:
+    instances:
+      ragflow:
+        timeout-duration: 10s
 
 # 生产日志：收敛 Spring AI 的 DEBUG 噪声
 logging:
@@ -184,6 +205,14 @@ management:
     metrics:
       export:
         enabled: true
+  # 生产环境追踪：降低采样率减少开销
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:0.1}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://tempo:4317}/v1/traces
+      transport: grpc
   info:
     env:
       enabled: true

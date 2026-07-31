@@ -141,7 +141,7 @@ sxw:
         - whoami
         - hostname
         - date
-# Resilience4j：DashScope 调用的高可用三件套
+# Resilience4j：外部调用的高可用保护
 resilience4j:
   retry:
     instances:
@@ -154,6 +154,12 @@ resilience4j:
         ignore-exceptions:
           - io.github.resilience4j.circuitbreaker.CallNotPermittedException
           - io.github.resilience4j.ratelimiter.RequestNotPermitted
+      ragflow:
+        max-attempts: 2
+        wait-duration: 1s
+      ollama:
+        max-attempts: 1
+        wait-duration: 500ms
   ratelimiter:
     instances:
       dashscope:
@@ -171,6 +177,21 @@ resilience4j:
         permitted-number-of-calls-in-half-open-state: 3
         automatic-transition-from-open-to-half-open-enabled: true
         register-health-indicator: true
+      ragflow:
+        sliding-window-size: 10
+        failure-rate-threshold: 60
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        register-health-indicator: true
+      ollama:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 20s
+        register-health-indicator: true
+  timelimiter:
+    instances:
+      ragflow:
+        timeout-duration: 10s
 # 修改日志级别，查看 Spring AI 更多调用细节
 logging:
   level:
@@ -194,3 +215,11 @@ management:
     metrics:
       export:
         enabled: true
+  # 分布式追踪（Micrometer Tracing + OTel OTLP）
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:1.0}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}/v1/traces
+      transport: grpc

@@ -3,6 +3,11 @@ package com.sxw.sxwaiagent.infrastructure.rag;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.retry.Retry;
+import io.github.resilience4j.timelimiter.TimeLimiter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.URI;
@@ -15,27 +20,72 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * Minimal RAGFlow HTTP client for POST /api/v1/retrieval.
  */
 public class RagFlowClient {
 
+    private static final Logger log = LoggerFactory.getLogger(RagFlowClient.class);
+
     private final RagFlowProperties properties;
     private final HttpClient httpClient;
+    private final Retry retry;
+    private final CircuitBreaker circuitBreaker;
+    private final TimeLimiter timeLimiter;
 
     public RagFlowClient(RagFlowProperties properties) {
         this(properties, HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(Math.max(1, properties.getTimeoutSeconds())))
-                .build());
+                .build(), null, null, null);
     }
 
-    RagFlowClient(RagFlowProperties properties, HttpClient httpClient) {
+    public RagFlowClient(RagFlowProperties properties, Retry retry,
+                         CircuitBreaker circuitBreaker, TimeLimiter timeLimiter) {
+        this(properties, HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(Math.max(1, properties.getTimeoutSeconds())))
+                .build(), retry, circuitBreaker, timeLimiter);
+    }
+
+    RagFlowClient(RagFlowProperties properties, HttpClient httpClient,
+                  Retry retry, CircuitBreaker circuitBreaker, TimeLimiter timeLimiter) {
         this.properties = properties;
         this.httpClient = httpClient;
+        this.retry = retry;
+        this.circuitBreaker = circuitBreaker;
+        this.timeLimiter = timeLimiter;
+        if (circuitBreaker != null) {
+            circuitBreaker.getEventPublisher()
+                    .onStateTransition(e -> log.warn("ragflow CB state {} -> {}",
+                            e.getStateTransition().getFromState(),
+                            e.getStateTransition().getToState()));
+        }
+        if (retry != null) {
+            retry.getEventPublisher()
+                    .onRetry(e -> log.warn("ragflow retry attempt={} lastError={}",
+                            e.getNumberOfRetryAttempts(),
+                            e.getLastThrowable() == null ? "n/a" : e.getLastThrowable().toString()));
+        }
     }
 
     public RetrievalResult retrieve(String question) {
+        Supplier<RetrievalResult> httpCall = () -> doRetrieve(question);
+        // 装饰链（由内向外）：httpCall → TimeLimiter → CircuitBreaker → Retry
+        Supplier<RetrievalResult> decorated = httpCall;
+        if (timeLimiter != null) {
+            decorated = TimeLimiter.decorateSupplier(timeLimiter, decorated);
+        }
+        if (circuitBreaker != null) {
+            decorated = CircuitBreaker.decorateSupplier(circuitBreaker, decorated);
+        }
+        if (retry != null) {
+            decorated = Retry.decorateSupplier(retry, decorated);
+        }
+        return decorated.get();
+    }
+
+    private RetrievalResult doRetrieve(String question) {
         String body = buildRequestBody(question);
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(endpointUrl()))
