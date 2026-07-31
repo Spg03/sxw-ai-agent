@@ -4,9 +4,11 @@ import com.sxw.sxwaiagent.auth.AuthService;
 import com.sxw.sxwaiagent.auth.AuthenticatedUser;
 import com.sxw.sxwaiagent.auth.dto.AuthResponse;
 import com.sxw.sxwaiagent.auth.dto.LoginRequest;
+import com.sxw.sxwaiagent.auth.dto.RefreshRequest;
 import com.sxw.sxwaiagent.auth.dto.RegisterRequest;
 import com.sxw.sxwaiagent.auth.dto.UserView;
 import com.sxw.sxwaiagent.common.api.Result;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,6 +37,11 @@ public class AuthController {
         return Result.ok(authService.login(request));
     }
 
+    @PostMapping("/refresh")
+    public Result<AuthResponse> refresh(@Valid @RequestBody RefreshRequest request) {
+        return Result.ok(authService.refreshToken(request.refreshToken()));
+    }
+
     @GetMapping("/me")
     public Result<UserView> me(Authentication authentication) {
         AuthenticatedUser user = (AuthenticatedUser) authentication.getPrincipal();
@@ -42,7 +49,18 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public Result<Void> logout() {
+    public Result<Void> logout(Authentication authentication, HttpServletRequest request) {
+        String accessToken = extractBearerToken(request);
+        String username = ((AuthenticatedUser) authentication.getPrincipal()).username();
+        authService.logout(accessToken, username);
         return Result.ok();
+    }
+
+    private String extractBearerToken(HttpServletRequest request) {
+        String header = request.getHeader("Authorization");
+        if (header != null && header.startsWith("Bearer ")) {
+            return header.substring("Bearer ".length());
+        }
+        return null;
     }
 }

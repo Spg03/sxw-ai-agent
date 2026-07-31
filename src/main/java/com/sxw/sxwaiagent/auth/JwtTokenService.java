@@ -7,8 +7,12 @@ import org.springframework.stereotype.Service;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.HexFormat;
+import java.util.UUID;
 
 @Service
 public class JwtTokenService {
@@ -78,5 +82,39 @@ public class JwtTokenService {
                 left.getBytes(StandardCharsets.UTF_8),
                 right.getBytes(StandardCharsets.UTF_8)
         );
+    }
+
+    /**
+     * 生成随机 Refresh Token（UUID v4 格式，不可预测且无签名含义）。
+     */
+    public String generateRefreshToken() {
+        return UUID.randomUUID().toString();
+    }
+
+    /**
+     * 对 token 做 SHA-256 摘要，用于存储和比对（避免明文落库）。
+     */
+    public static String getTokenHash(String token) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(token.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
+    }
+
+    /**
+     * 从 JWT 中提取过期时间（epoch millis），用于加入黑名单时设定清理时间。
+     */
+    public long resolveExpiresAtMs(String token) {
+        String[] parts = token == null ? new String[0] : token.split("\\.");
+        if (parts.length != 3) {
+            throw new IllegalArgumentException("invalid token");
+        }
+        String payload = new String(URL_DECODER.decode(parts[1]), StandardCharsets.UTF_8);
+        JSONObject claims = JSONUtil.parseObj(payload);
+        long expSeconds = claims.getLong("exp", 0L);
+        return expSeconds * 1000L;
     }
 }

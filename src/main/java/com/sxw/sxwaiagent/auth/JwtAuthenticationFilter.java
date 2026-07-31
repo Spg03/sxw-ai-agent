@@ -16,20 +16,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenService jwtTokenService;
     private final UserAccountRepository userAccountRepository;
+    private final TokenBlacklistService tokenBlacklistService;
 
     public JwtAuthenticationFilter(JwtTokenService jwtTokenService,
-                                   UserAccountRepository userAccountRepository) {
+                                   UserAccountRepository userAccountRepository,
+                                   TokenBlacklistService tokenBlacklistService) {
         this.jwtTokenService = jwtTokenService;
         this.userAccountRepository = userAccountRepository;
+        this.tokenBlacklistService = tokenBlacklistService;
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        String header = request.getHeader("Authorization");
-        if (header != null && header.startsWith("Bearer ")) {
-            String token = header.substring("Bearer ".length());
+        String token = extractToken(request);
+        if (token != null) {
+            // 黑名单检查：已 logout 的 token 必须拒绝
+            if (tokenBlacklistService.isBlacklisted(token)) {
+                filterChain.doFilter(request, response);
+                return;
+            }
             if (jwtTokenService.validateToken(token)) {
                 String username = jwtTokenService.resolveUsername(token);
                 userAccountRepository.findByUsername(username)
@@ -45,5 +52,26 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * 提取 JWT token：优先从 Authorization Header 读取，
+     * 对于 SSE 端点（EventSource 不支持自定义 Header）允许从 query parameter 读取。
+     */
+    private String extractToken(HttpServletRequest request) {
+        // 1. 优先从 Authorization Header 读取
+        String header = request.getHeader("Authorization");
+        if (header != null && header.startsWith("Bearer ")) {
+            return header.substring("Bearer ".length());
+        }
+        // 2. SSE 端点允许从 query parameter 读取 token（最小化安全影响）
+        String path = request.getRequestURI();
+        if (path != null && path.endsWith("/stream")) {
+            String token = request.getParameter("token");
+            if (token != null && !token.isBlank()) {
+                return token;
+            }
+        }
+        return null;
     }
 }
