@@ -8,7 +8,9 @@ import com.sxw.sxwaiagent.agent.prompt.AssembledPrompt;
 import com.sxw.sxwaiagent.agent.prompt.PromptAssembler;
 import com.sxw.sxwaiagent.agent.prompt.PromptRunRecorder;
 import com.sxw.sxwaiagent.agent.tool.ToolExecutor;
+import com.sxw.sxwaiagent.agent.tool.ToolRegistry;
 import com.sxw.sxwaiagent.agent.tool.ToolResult;
+import com.sxw.sxwaiagent.plan.PlanReviewService;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryConfig;
@@ -55,6 +57,8 @@ class ToolUseLoopRuntimeTest {
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private PromptAssembler promptAssembler;
     @Mock private PromptRunRecorder promptRunRecorder;
+    @Mock private PlanReviewService planReviewService;
+    @Mock private ToolRegistry toolRegistry;
     @Mock private AgentProfile profile;
 
     private ToolUseLoopRuntime runtime;
@@ -74,7 +78,8 @@ class ToolUseLoopRuntimeTest {
                 chatModel, toolExecutor, eventPublisher,
                 promptAssembler, promptRunRecorder,
                 Executors.newSingleThreadExecutor(),
-                retryRegistry, cbRegistry
+                retryRegistry, cbRegistry,
+                planReviewService, toolRegistry
         );
 
         // 设置 @Value 字段
@@ -101,7 +106,8 @@ class ToolUseLoopRuntimeTest {
     }
 
     private ChatResponse mockResponse(String text, List<AssistantMessage.ToolCall> toolCalls) {
-        AssistantMessage msg = new AssistantMessage(text, java.util.Map.of(), toolCalls);
+        AssistantMessage msg = new AssistantMessage(text, java.util.Map.of(),
+                toolCalls != null ? toolCalls : List.of());
         return new ChatResponse(List.of(new Generation(msg)));
     }
 

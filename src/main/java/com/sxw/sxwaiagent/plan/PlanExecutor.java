@@ -77,7 +77,7 @@ public class PlanExecutor {
                             step.toolName(), args, requestId, traceId, step.stepIndex()
                     );
                     result = toolResult.content();
-                    if (toolResult.isSuccess()) {
+                    if (toolResult.success()) {
                         planRepository.updateStepStatus(planId, step.stepIndex(), Plan.StepStatus.COMPLETED);
                         stepResults.add(new StepResult(step.stepIndex(), true, result));
                     } else {

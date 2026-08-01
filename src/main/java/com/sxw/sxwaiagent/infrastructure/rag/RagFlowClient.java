@@ -71,11 +71,10 @@ public class RagFlowClient {
 
     public RetrievalResult retrieve(String question) {
         Supplier<RetrievalResult> httpCall = () -> doRetrieve(question);
-        // 装饰链（由内向外）：httpCall → TimeLimiter → CircuitBreaker → Retry
+        // 装饰链（由内向外）：httpCall → CircuitBreaker → Retry
+        // 注：TimeLimiter 在 Resilience4j 2.x 仅支持 Future/CompletionStage，
+        // 同步超时由 HttpClient.connectTimeout + HttpRequest.timeout 保证
         Supplier<RetrievalResult> decorated = httpCall;
-        if (timeLimiter != null) {
-            decorated = TimeLimiter.decorateSupplier(timeLimiter, decorated);
-        }
         if (circuitBreaker != null) {
             decorated = CircuitBreaker.decorateSupplier(circuitBreaker, decorated);
         }

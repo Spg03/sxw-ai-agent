@@ -3,9 +3,11 @@ package com.sxw.sxwaiagent.web.controller;
 import com.sxw.sxwaiagent.knowledge.DocumentIngestService;
 import com.sxw.sxwaiagent.knowledge.IngestStatus;
 import com.sxw.sxwaiagent.knowledge.KnowledgeRepository;
+import com.sxw.sxwaiagent.knowledge.KnowledgeRetrievalService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
@@ -26,17 +28,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 使用 @WebMvcTest 隔离 Controller 层，mock DocumentIngestService。
  */
 @WebMvcTest(KnowledgeController.class)
+@AutoConfigureMockMvc(addFilters = false)
 class KnowledgeControllerTest {
 
     @Autowired private MockMvc mockMvc;
     @MockBean private DocumentIngestService ingestService;
+    @MockBean private KnowledgeRetrievalService retrievalService;
 
     // ── 文档上传 ─────────────────────────────────────────────────────
 
     @Test
     @DisplayName("POST /api/knowledge/documents 上传成功返回 docId")
     void uploadDocumentSuccess() throws Exception {
-        var result = new DocumentIngestService.IngestResult("doc-123", 5, "OK", IngestStatus.SUCCESS);
+        var result = new DocumentIngestService.IngestResult("doc-123", 5, "OK", IngestStatus.CREATED);
         when(ingestService.ingestFromFile(any(), anyBoolean(), any())).thenReturn(result);
 
         MockMultipartFile file = new MockMultipartFile(
@@ -52,7 +56,7 @@ class KnowledgeControllerTest {
     @Test
     @DisplayName("POST /api/knowledge/documents 上传失败返回错误")
     void uploadDocumentFailure() throws Exception {
-        var result = new DocumentIngestService.IngestResult(null, 0, "文件为空", IngestStatus.FAILED);
+        var result = new DocumentIngestService.IngestResult(null, 0, "文件为空", null);
         when(ingestService.ingestFromFile(any(), anyBoolean(), any())).thenReturn(result);
 
         MockMultipartFile file = new MockMultipartFile(
@@ -60,7 +64,7 @@ class KnowledgeControllerTest {
 
         mockMvc.perform(multipart("/api/knowledge/documents").file(file))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.code").value(1));
+            .andExpect(jsonPath("$.code").value(500));
     }
 
     // ── 文本入库 ─────────────────────────────────────────────────────
@@ -68,7 +72,7 @@ class KnowledgeControllerTest {
     @Test
     @DisplayName("POST /api/knowledge/documents/text 文本入库成功")
     void ingestTextSuccess() throws Exception {
-        var result = new DocumentIngestService.IngestResult("doc-txt", 3, "OK", IngestStatus.SUCCESS);
+        var result = new DocumentIngestService.IngestResult("doc-txt", 3, "OK", IngestStatus.CREATED);
         when(ingestService.ingest(anyString(), anyString(), anyString(), anyBoolean(), any()))
             .thenReturn(result);
 
@@ -114,7 +118,7 @@ class KnowledgeControllerTest {
     @Test
     @DisplayName("PUT /api/knowledge/documents/{docId}/content 重新索引成功")
     void reindexDocumentSuccess() throws Exception {
-        var result = new DocumentIngestService.IngestResult("doc-re", 8, "OK", IngestStatus.SUCCESS);
+        var result = new DocumentIngestService.IngestResult("doc-re", 8, "OK", IngestStatus.REINDEXED);
         when(ingestService.reindex(eq("doc-re"), anyString(), any())).thenReturn(result);
 
         mockMvc.perform(put("/api/knowledge/documents/doc-re/content")
@@ -134,6 +138,6 @@ class KnowledgeControllerTest {
                 .contentType(MediaType.TEXT_PLAIN)
                 .content("content"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.code").value(1));
+            .andExpect(jsonPath("$.code").value(500));
     }
 }
