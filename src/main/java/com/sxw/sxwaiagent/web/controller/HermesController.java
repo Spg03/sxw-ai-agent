@@ -75,4 +75,28 @@ public class HermesController {
             return Result.error("Failed to reject candidate (not found or not in PENDING status)");
         }
     }
+    
+    @Operation(summary = "重试应用失败候选", description = "对 APPLY_FAILED 状态的候选重新尝试应用")
+    @PostMapping("/{candidateId}/retry")
+    public Result<String> retryApply(
+        @PathVariable String candidateId,
+        @RequestParam @NotBlank String reviewedBy
+    ) {
+        log.info("Retrying apply for candidate {} by {}", candidateId, reviewedBy);
+        
+        boolean success = candidateService.retryApply(candidateId, reviewedBy);
+        
+        if (success) {
+            return Result.ok("Candidate applied successfully on retry");
+        } else {
+            return Result.error("Retry failed (not found, not in APPLY_FAILED status, or apply error)");
+        }
+    }
+    
+    @Operation(summary = "获取应用失败候选列表")
+    @GetMapping("/failed")
+    public Result<List<HermesCandidate>> getFailedCandidates() {
+        List<HermesCandidate> candidates = candidateService.getFailedCandidates();
+        return Result.ok(candidates);
+    }
 }

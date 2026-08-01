@@ -11,6 +11,7 @@ import java.util.List;
  * @param citations  引用列表
  * @param toolCalls  工具调用信息
  * @param latencyMs  延迟（毫秒）
+ * @param errorKind  错误分类（正常响应时为 null）
  */
 public record AgentResponse(
         String requestId,
@@ -18,7 +19,8 @@ public record AgentResponse(
         String answer,
         List<String> citations,
         List<ToolCallInfo> toolCalls,
-        long latencyMs
+        long latencyMs,
+        AgentErrorKind errorKind
 ) {
     
     /**
@@ -44,6 +46,7 @@ public record AgentResponse(
         private List<String> citations;
         private List<ToolCallInfo> toolCalls;
         private long latencyMs;
+        private AgentErrorKind errorKind;
         
         public Builder requestId(String requestId) {
             this.requestId = requestId;
@@ -75,8 +78,13 @@ public record AgentResponse(
             return this;
         }
         
+        public Builder errorKind(AgentErrorKind errorKind) {
+            this.errorKind = errorKind;
+            return this;
+        }
+        
         public AgentResponse build() {
-            return new AgentResponse(requestId, traceId, answer, citations, toolCalls, latencyMs);
+            return new AgentResponse(requestId, traceId, answer, citations, toolCalls, latencyMs, errorKind);
         }
     }
 }

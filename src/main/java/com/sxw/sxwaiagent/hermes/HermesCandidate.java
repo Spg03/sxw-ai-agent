@@ -24,9 +24,11 @@ public record HermesCandidate(
     BigDecimal confidence
 ) {
     public enum CandidateStatus {
-        PENDING,    // 待审核
-        APPROVED,   // 已批准
-        REJECTED    // 已拒绝
+        PENDING,        // 待审核
+        APPROVED,       // 已批准
+        REJECTED,       // 已拒绝
+        APPLIED,        // 已成功应用
+        APPLY_FAILED    // 应用失败，可重试
     }
 
     /**

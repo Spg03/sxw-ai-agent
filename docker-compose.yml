@@ -17,6 +17,9 @@ services:
       SXW_SECURITY_API_KEY: ${SXW_SECURITY_API_KEY:-}
       SXW_AGENT_TRACE_MAX_RUNS: ${SXW_AGENT_TRACE_MAX_RUNS:-100}
       SXW_AGENT_TRACE_MAX_EVENTS_PER_RUN: ${SXW_AGENT_TRACE_MAX_EVENTS_PER_RUN:-200}
+      DATABASE_URL: ${DATABASE_URL:-jdbc:postgresql://pgvector:5432/sxw_ai_agent}
+      DATABASE_USERNAME: ${DATABASE_USERNAME:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD must be set}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
@@ -29,9 +32,11 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      pgvector:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/api/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/actuator/health/readiness"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -40,7 +45,7 @@ services:
       resources:
         limits:
           cpus: '2.0'
-          memory: 1G
+          memory: 2G
         reservations:
           cpus: '0.5'
           memory: 512M
@@ -149,18 +154,39 @@ services:
       - tempo
       - loki
 
-  # 可选：启用 PgVector 时取消注释，并把 application.yml 的 datasource/vectorstore 打开
-  # pgvector:
-  #   image: pgvector/pgvector:pg16
-  #   container_name: sxw-pgvector
-  #   environment:
-  #     POSTGRES_USER: postgres
-  #     POSTGRES_PASSWORD: postgres
-  #     POSTGRES_DB: sxw_ai
-  #   ports:
-  #     - "5432:5432"
-  #   volumes:
-  #     - pgvector-data:/var/lib/postgresql/data
+  # PgVector 数据库（主数据库 + 向量存储）
+  pgvector:
+    image: pgvector/pgvector:pg16
+    container_name: sxw-pgvector
+    environment:
+      POSTGRES_USER: ${DATABASE_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD must be set}
+      POSTGRES_DB: sxw_ai_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgvector-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    networks:
+      - backend
 
 volumes:
   note-data:
@@ -169,7 +195,7 @@ volumes:
   grafana-data:
   tempo-data:
   loki-data:
-  # pgvector-data:
+  pgvector-data:
 
 networks:
   backend:

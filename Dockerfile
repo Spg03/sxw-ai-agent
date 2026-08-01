@@ -29,6 +29,6 @@ ENV JAVA_OPTS="-XX:+UseZGC -XX:MaxRAMPercentage=75.0" \
 EXPOSE 8123
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:${SERVER_PORT}/api/health || exit 1
+  CMD wget -qO- http://127.0.0.1:${SERVER_PORT}/actuator/health/liveness || exit 1
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]

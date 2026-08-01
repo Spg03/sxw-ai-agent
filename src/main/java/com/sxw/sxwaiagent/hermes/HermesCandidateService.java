@@ -94,10 +94,11 @@ public class HermesCandidateService {
         );
         try {
             String result = hermesApplier.apply(approvedCandidate);
+            repository.updateStatus(candidateId, HermesCandidate.CandidateStatus.APPLIED, reviewedBy);
             log.info("Applied candidate {}: {}", candidateId, result);
         } catch (Exception e) {
+            repository.updateStatus(candidateId, HermesCandidate.CandidateStatus.APPLY_FAILED, reviewedBy);
             log.error("Failed to apply candidate {} after approval: {}", candidateId, e.getMessage(), e);
-            // Approval succeeded, apply failed — do not block the approval
         }
         
         return true;
@@ -120,5 +121,40 @@ public class HermesCandidateService {
         repository.updateStatus(candidateId, HermesCandidate.CandidateStatus.REJECTED, reviewedBy);
         log.info("Rejected candidate {} by {}", candidateId, reviewedBy);
         return true;
+    }
+    
+    /**
+     * 重试应用失败的候选
+     */
+    public boolean retryApply(String candidateId, String reviewedBy) {
+        Optional<HermesCandidate> candidateOpt = repository.findById(candidateId);
+        
+        if (candidateOpt.isEmpty()) {
+            log.warn("Candidate not found: {}", candidateId);
+            return false;
+        }
+        
+        HermesCandidate candidate = candidateOpt.get();
+        if (candidate.status() != HermesCandidate.CandidateStatus.APPLY_FAILED) {
+            log.warn("Candidate {} is not in APPLY_FAILED status (current: {})", candidateId, candidate.status());
+            return false;
+        }
+        
+        try {
+            String result = hermesApplier.apply(candidate);
+            repository.updateStatus(candidateId, HermesCandidate.CandidateStatus.APPLIED, reviewedBy);
+            log.info("Retry applied candidate {}: {}", candidateId, result);
+            return true;
+        } catch (Exception e) {
+            log.error("Retry apply failed for candidate {}: {}", candidateId, e.getMessage(), e);
+            return false;
+        }
+    }
+    
+    /**
+     * 获取应用失败的候选列表
+     */
+    public List<HermesCandidate> getFailedCandidates() {
+        return repository.findByStatus(HermesCandidate.CandidateStatus.APPLY_FAILED);
     }
 }

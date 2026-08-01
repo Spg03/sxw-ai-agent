@@ -24,6 +24,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -97,6 +98,14 @@ public class ToolUseLoopRuntime implements AgentRuntime {
     
     @Value("${sxw.agent.runtime.max-retries:3}")
     private int maxRetries;
+
+    /**
+     * 工具消息协议模式：
+     * - system（默认）：工具结果通过 PromptAssembler 的 TOOL_RESULTS section 注入 SystemMessage
+     * - standard：使用标准 AssistantMessage(toolCalls) + ToolResponseMessage 消息对
+     */
+    @Value("${sxw.agent.runtime.tool-message-protocol:system}")
+    private String toolMessageProtocol;
     
     public ToolUseLoopRuntime(
             ChatModel chatModel,
@@ -138,6 +147,8 @@ public class ToolUseLoopRuntime implements AgentRuntime {
         // 执行 Tool-Use Loop
         List<AgentResponse.ToolCallInfo> toolCalls = new ArrayList<>();
         List<ToolResult> accumulatedToolResults = new ArrayList<>();
+        // standard 模式：维护 AssistantMessage(toolCalls) + ToolResponseMessage 消息对
+        List<Message> toolMessagePairs = new ArrayList<>();
         String finalAnswer = "";
         int turn = 0;
         
@@ -173,7 +184,7 @@ public class ToolUseLoopRuntime implements AgentRuntime {
             messages.add(new UserMessage(context.userMessage()));
             
             // 4. 工具调用的 Assistant + ToolResponse 消息（来自上一轮）
-            messages.addAll(buildToolMessages(toolCalls));
+            messages.addAll(buildToolMessages(toolCalls, toolMessagePairs));
             
             // 弹性调用 LLM（超时 + 重试 + 熔断）
             Prompt prompt = new Prompt(messages);
@@ -245,6 +256,22 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                     accumulatedToolResults.add(toolResult);
                 }
                 
+                // standard 模式：记录 AssistantMessage(toolCalls) + ToolResponseMessage 对
+                if ("standard".equals(toolMessageProtocol)) {
+                    toolMessagePairs.add(assistantMessage);
+                    List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
+                    for (var tc : assistantMessage.getToolCalls()) {
+                        // 找到对应的工具结果
+                        String result = toolCalls.stream()
+                            .filter(c -> c.name().equals(tc.name()))
+                            .reduce((a, b) -> b) // 取最后一个匹配的
+                            .map(AgentResponse.ToolCallInfo::result)
+                            .orElse("");
+                        responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(), result));
+                    }
+                    toolMessagePairs.add(new ToolResponseMessage(responses));
+                }
+
                 // 继续循环
                 continue;
             }
@@ -277,7 +304,9 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                 context.requestId(),
                 context.traceId(),
                 profile.code().name(),
-                response
+                response,
+                context.chatId(),
+                context.userMessage()
         ));
         
         return response;
@@ -309,6 +338,7 @@ public class ToolUseLoopRuntime implements AgentRuntime {
         
         List<AgentResponse.ToolCallInfo> toolCalls = new ArrayList<>();
         List<ToolResult> accumulatedToolResults = new ArrayList<>();
+        List<Message> toolMessagePairs = new ArrayList<>();
         String finalAnswer = "";
         int turn = 0;
         
@@ -327,7 +357,7 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                     messages.addAll(trimmedHistory);
                 }
                 messages.add(new UserMessage(context.userMessage()));
-                messages.addAll(buildToolMessages(toolCalls));
+                messages.addAll(buildToolMessages(toolCalls, toolMessagePairs));
                 
                 // 弹性流式调用 LLM（超时 + 熔断）
                 Prompt prompt = new Prompt(messages);
@@ -453,6 +483,24 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                             throw new SseIOException(e);
                         }
                     }
+
+                    // standard 模式：记录 AssistantMessage(toolCalls) + ToolResponseMessage 对
+                    if ("standard".equals(toolMessageProtocol)) {
+                        AssistantMessage assistantWithTools = new AssistantMessage(
+                            "", Map.of(), collectedToolCalls);
+                        toolMessagePairs.add(assistantWithTools);
+                        List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
+                        for (var tc : collectedToolCalls) {
+                            String result = toolCalls.stream()
+                                .filter(c -> c.name().equals(tc.name()))
+                                .reduce((a, b) -> b)
+                                .map(AgentResponse.ToolCallInfo::result)
+                                .orElse("");
+                            responses.add(new ToolResponseMessage.ToolResponse(tc.id(), tc.name(), result));
+                        }
+                        toolMessagePairs.add(new ToolResponseMessage(responses));
+                    }
+
                     continue;
                 }
                 
@@ -511,7 +559,8 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                     .build();
             eventPublisher.publishEvent(new AgentRunCompletedEvent(
                     this, context.requestId(), context.traceId(),
-                    profile.code().name(), response
+                    profile.code().name(), response,
+                    context.chatId(), context.userMessage()
             ));
             
         } catch (SseIOException e) {
@@ -726,7 +775,9 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                 context.requestId(),
                 context.traceId(),
                 profile.code().name(),
-                response
+                response,
+                context.chatId(),
+                context.userMessage()
         ));
         
         return response;
@@ -792,10 +843,13 @@ public class ToolUseLoopRuntime implements AgentRuntime {
      * 每轮 LLM 调用需要携带之前工具调用的 AssistantMessage + ToolResponseMessage，
      * 让模型感知工具执行结果。
      */
-    private List<Message> buildToolMessages(List<AgentResponse.ToolCallInfo> toolCalls) {
-        // Tool-Use Loop 中工具结果通过 PromptAssembler 的 TOOL_RESULTS section 注入 SystemMessage，
+    private List<Message> buildToolMessages(List<AgentResponse.ToolCallInfo> toolCalls, List<Message> toolMessagePairs) {
+        if ("standard".equals(toolMessageProtocol)) {
+            // standard 模式：返回累积的 AssistantMessage(toolCalls) + ToolResponseMessage 对
+            return toolMessagePairs;
+        }
+        // system 模式（默认）：工具结果通过 PromptAssembler 的 TOOL_RESULTS section 注入 SystemMessage，
         // 此处无需重复添加 ToolResponseMessage，避免信息冗余。
-        // 保留此扩展点，供未来切换为 Claude tool_use/tool_result 模式时使用。
         return List.of();
     }
     

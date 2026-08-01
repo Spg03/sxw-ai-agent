@@ -9,15 +9,16 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * 统一工具执行器（P3 增强版）
  * <p>
  * 执行链路：
- * ToolCall → ToolRegistry → ToolRiskEvaluator → ApprovalService → Execute → ToolAuditLog
+ * ToolCall → Registry → **Validators** → RiskEvaluator → ApprovalService → **Hooks.before** → Execute → **Hooks.after** → ToolAuditLog
  * <p>
- * P3 新增：风险检查、审批服务、审计日志
+ * P3 新增：风险检查、审批服务、审计日志、参数校验、执行钩子
  */
 @Component
 public class ToolExecutor {
@@ -30,6 +31,8 @@ public class ToolExecutor {
     private final ToolRiskEvaluator riskEvaluator;
     private final ApprovalService approvalService;
     private final ToolAuditLog auditLog;
+    private final List<ToolValidator> validators;
+    private final List<ToolHook> hooks;
     private final Map<String, ToolCallback> toolMap;
 
     public ToolExecutor(
@@ -38,7 +41,9 @@ public class ToolExecutor {
             ToolRegistry toolRegistry,
             ToolRiskEvaluator riskEvaluator,
             ApprovalService approvalService,
-            ToolAuditLog auditLog
+            ToolAuditLog auditLog,
+            List<ToolValidator> validators,
+            List<ToolHook> hooks
     ) {
         this.allTools = allTools;
         this.traceRecorder = traceRecorder;
@@ -46,6 +51,8 @@ public class ToolExecutor {
         this.riskEvaluator = riskEvaluator;
         this.approvalService = approvalService;
         this.auditLog = auditLog;
+        this.validators = validators != null ? validators : List.of();
+        this.hooks = hooks != null ? hooks : List.of();
         this.toolMap = new HashMap<>();
 
         for (ToolCallback tool : allTools) {
@@ -53,7 +60,8 @@ public class ToolExecutor {
             toolMap.put(toolName, tool);
         }
 
-        log.info("ToolExecutor initialized with {} tools (governance enabled)", toolMap.size());
+        log.info("ToolExecutor initialized with {} tools, {} validators, {} hooks",
+            toolMap.size(), this.validators.size(), this.hooks.size());
     }
 
     /**
@@ -82,7 +90,20 @@ public class ToolExecutor {
             return ToolResult.failure(errorMsg);
         }
 
-        // 2. 风险评估
+        // 2. 参数校验（Validator 链）
+        ToolDefinition toolDef = toolRegistry.get(toolName).orElse(null);
+        for (ToolValidator validator : validators) {
+            ToolValidator.ValidationResult vr = validator.validate(toolName, arguments, toolDef);
+            if (!vr.valid()) {
+                log.warn("[{}] Tool {} validation failed by {}: {}", requestId, toolName,
+                    validator.getClass().getSimpleName(), vr.rejectReason());
+                auditLog.record(requestId, traceId, turn, toolName, null, arguments, vr.rejectReason(), "validation_failed", 0, false, null);
+                traceRecorder.recordToolCall(requestId, traceId, turn, toolName, arguments, vr.rejectReason(), "validation_failed", 0);
+                return ToolResult.failure("Validation failed: " + vr.rejectReason());
+            }
+        }
+
+        // 3. 风险评估
         ToolRiskLevel riskLevel = null;
         if (profile != null) {
             ToolRiskEvaluator.EvaluationResult eval = riskEvaluator.evaluate(toolName, profile);
@@ -95,7 +116,7 @@ public class ToolExecutor {
                 return ToolResult.failure("Tool rejected: " + eval.rejectReason());
             }
 
-            // 3. 审批检查（如果需要审批，创建审批请求并拒绝执行）
+        // 4. 审批检查（如果需要审批，创建审批请求并拒绝执行）
             if (eval.needsApproval()) {
                 ApprovalService.ApprovalRequest approvalReq = approvalService.createApprovalRequest(
                         requestId, traceId, toolName, arguments,
@@ -107,10 +128,23 @@ public class ToolExecutor {
             }
         }
 
-        // 4. 执行工具
+        // 5. Hooks.before
+        for (ToolHook hook : hooks) {
+            hook.beforeExecution(toolName, arguments, requestId);
+        }
+
+        // 6. 执行工具
         try {
             String result = tool.call(arguments);
             long latencyMs = System.currentTimeMillis() - startTime;
+
+            // Hooks.after（可能截断结果）
+            for (ToolHook hook : hooks) {
+                String modified = hook.afterExecution(toolName, result, latencyMs, true, requestId);
+                if (modified != null) {
+                    result = modified;
+                }
+            }
 
             log.info("[{}] Tool {} completed in {}ms", requestId, toolName, latencyMs);
 
@@ -125,6 +159,11 @@ public class ToolExecutor {
             long latencyMs = System.currentTimeMillis() - startTime;
             String errorMsg = "Tool execution failed: " + e.getMessage();
             log.error("[{}] Tool {} failed: {}", requestId, toolName, errorMsg, e);
+
+            // Hooks.after（失败路径）
+            for (ToolHook hook : hooks) {
+                hook.afterExecution(toolName, errorMsg, latencyMs, false, requestId);
+            }
 
             traceRecorder.recordToolCall(requestId, traceId, turn, toolName, arguments, errorMsg, "failed", latencyMs);
             auditLog.record(requestId, traceId, turn, toolName, riskLevel, arguments, errorMsg, "failed", latencyMs, true, null);

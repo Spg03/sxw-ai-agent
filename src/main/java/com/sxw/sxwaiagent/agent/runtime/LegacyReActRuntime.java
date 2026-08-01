@@ -1,6 +1,7 @@
 package com.sxw.sxwaiagent.agent.runtime;
 
 import com.sxw.sxwaiagent.agent.dto.AgentContext;
+import com.sxw.sxwaiagent.agent.dto.AgentErrorKind;
 import com.sxw.sxwaiagent.agent.dto.AgentResponse;
 import com.sxw.sxwaiagent.agent.hermes.HermesAgent;
 import com.sxw.sxwaiagent.agent.hermes.HermesReply;
@@ -74,8 +75,19 @@ public class LegacyReActRuntime implements AgentRuntime {
                 case HERMES -> executeHermesProfile(context);
             };
         } catch (Exception e) {
-            log.error("[{}] Execution failed: {}", context.requestId(), e.getMessage(), e);
-            answer = "抱歉，处理您的请求时遇到了问题，请稍后重试。";
+            AgentErrorKind errorKind = AgentErrorKind.fromException(e);
+            log.error("[{}] Execution failed [{}]: {}", context.requestId(), errorKind, e.getMessage(), e);
+            
+            long latencyMs = System.currentTimeMillis() - startTime;
+            return AgentResponse.builder()
+                    .requestId(context.requestId())
+                    .traceId(context.traceId())
+                    .answer(errorKind.userMessage())
+                    .citations(List.of())
+                    .toolCalls(List.of())
+                    .latencyMs(latencyMs)
+                    .errorKind(errorKind)
+                    .build();
         }
         
         long latencyMs = System.currentTimeMillis() - startTime;

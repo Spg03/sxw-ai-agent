@@ -66,9 +66,9 @@ public class SecurityConfig {
                         // Spring 默认错误页面
                         .requestMatchers("/error").permitAll()
 
-                        // ─── Actuator 敏感端点：需要认证 ───
-                        // TODO: 实现角色管理后改回 hasRole("ADMIN")，当前所有已认证用户可访问
-                        .requestMatchers("/actuator/**").authenticated()
+                        // ─── Actuator 敏感端点：需要 ADMIN 角色 ───
+                        // prometheus/env/heapdump/metrics 等仅管理员可访问
+                        .requestMatchers("/actuator/**").hasRole("ADMIN")
 
                         // ─── 前端 SPA 静态资源 ───
                         .requestMatchers("/", "/index.html", "/favicon.ico", "/favicon.svg", "/assets/**", "/icons.svg").permitAll();

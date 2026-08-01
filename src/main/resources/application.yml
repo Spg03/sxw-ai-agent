@@ -6,7 +6,7 @@ spring:
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/sxw_ai_agent}
     username: ${DATABASE_USERNAME:postgres}
-    password: ${DATABASE_PASSWORD:postgres}
+    password: ${DATABASE_PASSWORD:}
     driver-class-name: org.postgresql.Driver
   data:
     redis:
@@ -141,6 +141,13 @@ sxw:
         - whoami
         - hostname
         - date
+    validation:
+      enabled: ${TOOL_VALIDATION_ENABLED:true}
+      max-argument-chars: ${TOOL_VALIDATION_MAX_ARG_CHARS:8192}
+  hermes:
+    # Hermes 复盘分析器配置
+    llm-enabled: ${HERMES_LLM_ENABLED:true}
+    min-confidence: ${HERMES_MIN_CONFIDENCE:0.6}
 # Resilience4j：外部调用的高可用保护
 resilience4j:
   retry:

@@ -13,14 +13,30 @@ public class AgentRunCompletedEvent extends ApplicationEvent {
     private final String traceId;
     private final String profileCode;
     private final AgentResponse response;
+    private final String chatId;
+    private final String userMessage;
     
+    /**
+     * 完整构造器
+     */
     public AgentRunCompletedEvent(Object source, String requestId, String traceId,
-                                  String profileCode, AgentResponse response) {
+                                  String profileCode, AgentResponse response,
+                                  String chatId, String userMessage) {
         super(source);
         this.requestId = requestId;
         this.traceId = traceId;
         this.profileCode = profileCode;
         this.response = response;
+        this.chatId = chatId;
+        this.userMessage = userMessage;
+    }
+    
+    /**
+     * 兼容旧构造器（chatId/userMessage 为 null）
+     */
+    public AgentRunCompletedEvent(Object source, String requestId, String traceId,
+                                  String profileCode, AgentResponse response) {
+        this(source, requestId, traceId, profileCode, response, null, null);
     }
     
     public String getRequestId() {
@@ -37,5 +53,13 @@ public class AgentRunCompletedEvent extends ApplicationEvent {
     
     public AgentResponse getResponse() {
         return response;
+    }
+    
+    public String getChatId() {
+        return chatId;
+    }
+    
+    public String getUserMessage() {
+        return userMessage;
     }
 }
