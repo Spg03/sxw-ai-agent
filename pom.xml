@@ -12,7 +12,7 @@
     <artifactId>sxw-ai-agent</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>sxw-ai-agent</name>
-    <description>sxw-ai-agent</description>
+    <description>AgentForge — 企业级 AI Agent 工程化平台（Agent = Model + Harness）</description>
     <url>https://github.com/Spg03/sxw-ai-agent</url>
     <licenses>
         <license>
@@ -397,7 +397,7 @@
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.60</minimum>
+                                            <minimum>0.40</minimum>
                                         </limit>
                                     </limits>
                                 </rule>

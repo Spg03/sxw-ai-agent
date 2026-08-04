@@ -1,34 +1,32 @@
-<p align="center">
-  <h1 align="center">🤖 sxw-ai-agent</h1>
-  <p align="center">
-    <strong>企业级 AI Agent 工程化平台 — Agent = Model + Harness</strong>
-  </p>
-  <p align="center">
-    <img src="https://img.shields.io/badge/Java-21-orange" alt="Java 21"/>
-    <img src="https://img.shields.io/badge/Spring%20Boot-3.4.4-brightgreen" alt="Spring Boot 3.4.4"/>
-    <img src="https://img.shields.io/badge/Spring%20AI-1.0.0-blue" alt="Spring AI 1.0.0"/>
-    <img src="https://img.shields.io/badge/License-Apache%202.0-lightgrey" alt="License"/>
-  </p>
-  <p align="center">
-    <a href="#快速启动">🚀 快速启动</a> •
-    <a href="#核心架构">🏗️ 架构</a> •
-    <a href="#核心能力">✨ 能力</a> •
-    <a href="#api-一览">📡 API</a> •
-    <a href="#部署">🐳 部署</a>
-  </p>
-</p>
+<div align="center">
+
+# ⚒️ AgentForge
+
+**企业级 AI Agent 工程化平台 — Agent = Model + Harness**
+
+*让 AI Agent 真正跑在生产环境里*
+
+![Java 21](https://img.shields.io/badge/Java-21-orange)
+![Spring Boot 3.4.4](https://img.shields.io/badge/Spring%20Boot-3.4.4-brightgreen)
+![Spring AI 1.0.0](https://img.shields.io/badge/Spring%20AI-1.0.0-blue)
+![React 19](https://img.shields.io/badge/React-19-61dafb)
+![License](https://img.shields.io/badge/License-Apache%202.0-lightgrey)
+
+[🚀 快速启动](#快速启动) · [🏗️ 架构](#核心架构) · [✨ 能力](#核心能力) · [📡 API](#api-一览) · [🐳 部署](#部署)
+
+</div>
 
 ---
 
 ## 为什么选择这个项目？
 
-这不只是一个「聊天 Demo」，而是一个 **围绕 Agent Harness 工程化的完整后端系统**。
+这不只是一个「聊天 Demo」，而是一个 **围绕 Agent Harness 工程化的完整平台**。
 
 当大多数 AI 项目停留在「调 API + 拼 Prompt」时，本项目聚焦于模型之外的系统化工程——
 
-> Prompt 管理 · Context 预算 · Tool 治理 · Memory 审核 · Knowledge 检索 · Trace 回放 · Eval 评测 · 主备降级 · 限流熔断 · JWT 鉴权 · MCP 协议
+> Prompt 版本管理 · Context Token 预算 · Tool 5 级风险治理 · Memory 审核写入 · Knowledge 向量检索 · Trace 全链路回放 · Eval LLM-Judge 评测 · 主备降级 · 限流熔断 · JWT 多层鉴权 · MCP 协议
 
-一句话：**让 AI Agent 真正跑在生产环境里。**
+一句话：**让 AI Agent 从「能跑」到「能上线」。**
 
 ---
 
@@ -393,20 +391,32 @@ mvn test -Dgroups=eval -Dtest=LoveAppEvalSuiteTest
 
 ---
 
-## 简历话术
+## 项目亮点
 
-> 设计并实现了基于 Spring AI 的企业级 AI Agent 工程化平台。采用「Agent = Model + Harness」理念，实现双运行时引擎（ToolUseLoop + LegacyReAct）、ChatModel 主备降级（DashScope + Ollama）、工具 5 级风险治理、结构化记忆审核、PgVector 知识库检索、Agent Trace 回放、LLM-Judge 评测、JWT + API Key 多层鉴权、Resilience4j 高可用三件套、MCP 协议暴露和 Prometheus 可观测性。项目覆盖 AI Agent 从开发到运维的完整工程链路。
+- ✅ 双运行时引擎（ToolUseLoop + LegacyReAct），渐进式架构迁移
+- ✅ ChatModel 主备降级（DashScope + Ollama），CircuitBreaker 保护
+- ✅ 工具 5 级风险治理 + 审批机制 + 审计日志
+- ✅ 结构化记忆审核写入（Hermes Candidate 流程）
+- ✅ PgVector 知识库检索 + RAGFlow 混合检索
+- ✅ Agent Trace 全链路记录 + 前端可视化回放
+- ✅ LLM-Judge 评测框架（关键词 + 模型评分）
+- ✅ JWT + Refresh Token + API Key 多层鉴权
+- ✅ Resilience4j 重试 / 限流 / 熔断三件套
+- ✅ MCP 协议暴露（SSE），对接 Claude Desktop / Cursor
+- ✅ React 19 前端控制台（对话、树洞、笔记、评测、追踪）
+- ✅ Prometheus + Grafana 可观测性
 
 ---
 
 ## 后续规划
 
+- [x] 前端工程独立化，增加 Agent 可视化面板和可观测 Dashboard
+- [x] 补充 GitHub Actions CI/CD 和 Docker 镜像发布
+- [x] Hermes 复盘系统闭环（Trace → 问题发现 → 改进建议 → 人工审核 → 应用）
 - [ ] 将 Agent Trace、会话记忆和评测报告持久化到数据库
-- [ ] 前端工程独立化，增加 Agent 可视化面板和可观测 Dashboard
-- [ ] 补充 GitHub Actions CI/CD 和 Docker 镜像发布
 - [ ] 接入更多 LLM Provider（OpenAI、DeepSeek 等）
-- [ ] Hermes 复盘系统自动化闭环（Trace → 问题发现 → 改进建议 → 人工审核 → 应用）
 - [ ] 线上演示环境搭建
+- [ ] Agent 工作流编排（多步骤任务拆解与执行）
 
 ---
 

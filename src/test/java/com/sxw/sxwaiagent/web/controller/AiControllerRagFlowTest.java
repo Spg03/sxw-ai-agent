@@ -37,7 +37,7 @@ class AiControllerRagFlowTest {
         );
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
-        mockMvc.perform(get("/ai/love_app/chat/ragflow/sync")
+        mockMvc.perform(get("/api/ai/love_app/chat/ragflow/sync")
                         .param("message", "hello")
                         .param("chatId", "chat-1"))
                 .andExpect(status().isOk())

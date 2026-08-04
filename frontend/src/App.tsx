@@ -10,6 +10,8 @@ import Eval from './pages/Eval'
 import Skills from './pages/Skills'
 import Traces from './pages/Traces'
 import Notes from './pages/Notes'
+import Hermes from './pages/Hermes'
+import Knowledge from './pages/Knowledge'
 
 function AppRoutes() {
   const { user, loading } = useAuth()
@@ -34,6 +36,8 @@ function AppRoutes() {
           <Route path="/chat" element={<Chat />} />
           <Route path="/treehole" element={<Treehole />} />
           <Route path="/notes" element={<Notes />} />
+          <Route path="/knowledge" element={<Knowledge />} />
+          <Route path="/hermes" element={<Hermes />} />
           <Route path="/eval" element={<Eval />} />
           <Route path="/skills" element={<Skills />} />
           <Route path="/traces" element={<Traces />} />

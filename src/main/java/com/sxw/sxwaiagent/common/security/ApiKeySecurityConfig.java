@@ -18,6 +18,6 @@ public class ApiKeySecurityConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new ApiKeyInterceptor(properties))
-                .addPathPatterns("/ai/**", "/notes/**", "/skills/**", "/agent/**");
+                .addPathPatterns("/api/ai/**", "/api/notes/**", "/api/skills/**", "/api/agent/**");
     }
 }

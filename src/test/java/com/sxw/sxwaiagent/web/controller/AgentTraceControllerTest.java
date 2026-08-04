@@ -37,7 +37,7 @@ class AgentTraceControllerTest {
         AgentTraceStore store = new AgentTraceStore(new AgentTraceProperties(), repo);
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgentTraceController(store)).build();
 
-        mockMvc.perform(get("/agent/traces/chat-1").param("limit", "1"))
+        mockMvc.perform(get("/api/agent/traces/chat-1").param("limit", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data[0].traceId").value(traceId))

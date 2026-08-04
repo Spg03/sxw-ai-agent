@@ -32,7 +32,7 @@ import java.util.Objects;
 import java.util.concurrent.Executor;
 
 @RestController
-@RequestMapping("/ai")
+@RequestMapping("/api/ai")
 @Validated
 @Slf4j
 @Tag(name = "AI 对话", description = "AI 恋爱大师 & Manus 超级智能体")

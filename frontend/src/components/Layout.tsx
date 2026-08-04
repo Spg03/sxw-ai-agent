@@ -9,6 +9,8 @@ import {
   TestTube,
   Wrench,
   Activity,
+  Brain,
+  BookOpen,
   LogOut
 } from 'lucide-react'
 
@@ -21,6 +23,8 @@ const navItems = [
   { path: '/chat', icon: MessageSquare, label: 'AI 对话' },
   { path: '/treehole', icon: Heart, label: '树洞' },
   { path: '/notes', icon: StickyNote, label: '笔记' },
+  { path: '/knowledge', icon: BookOpen, label: '知识库' },
+  { path: '/hermes', icon: Brain, label: 'Hermes 复盘' },
   { path: '/eval', icon: TestTube, label: '评测' },
   { path: '/skills', icon: Wrench, label: '技能' },
   { path: '/traces', icon: Activity, label: '追踪' },
@@ -41,8 +45,8 @@ export default function Layout({ children }: LayoutProps) {
               ❤
             </div>
             <div>
-              <div className="font-semibold text-slate-100">SXW AI Agent</div>
-              <div className="text-xs text-slate-400">智能助手平台</div>
+              <div className="font-semibold text-slate-100">AgentForge</div>
+              <div className="text-xs text-slate-400">AI Agent 工程化平台</div>
             </div>
           </div>
         </div>
@@ -93,8 +97,8 @@ export default function Layout({ children }: LayoutProps) {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        <div className="p-8 animate-fade-in">
+      <main className="flex-1 min-w-0 overflow-auto">
+        <div className={location.pathname === '/chat' ? 'h-screen animate-fade-in' : 'p-8 animate-fade-in'}>
           {children}
         </div>
       </main>

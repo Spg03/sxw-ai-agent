@@ -1,8 +1,4 @@
-import { api } from './client'
-
-interface RequestOptions {
-  signal?: AbortSignal
-}
+import { api, type RequestOptions } from './client'
 
 export interface DashboardStats {
   chatCount: number

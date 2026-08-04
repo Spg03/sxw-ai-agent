@@ -74,4 +74,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
         return null;
     }
+
+    /** SSE 内部 async dispatch 时也必须重新解析 JWT，否则 AuthorizationFilter 会拒绝 */
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
+    }
 }

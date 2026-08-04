@@ -87,10 +87,13 @@ public class ChatModelConfig {
                 log.warn("Ollama CircuitBreaker is OPEN, skipping fallback");
                 throw new IllegalStateException("Ollama fallback unavailable (circuit breaker open)");
             }
+            long start = System.nanoTime();
             try {
-                return fallback.call(prompt);
+                ChatResponse response = fallback.call(prompt);
+                ollamaCb.onSuccess(System.nanoTime() - start, java.util.concurrent.TimeUnit.NANOSECONDS);
+                return response;
             } catch (Exception ex) {
-                ollamaCb.onError(0, java.util.concurrent.TimeUnit.MILLISECONDS, ex);
+                ollamaCb.onError(System.nanoTime() - start, java.util.concurrent.TimeUnit.NANOSECONDS, ex);
                 throw ex;
             }
         }
@@ -101,8 +104,10 @@ public class ChatModelConfig {
                 log.warn("Ollama CircuitBreaker is OPEN, skipping fallback stream");
                 return Flux.error(new IllegalStateException("Ollama fallback unavailable (circuit breaker open)"));
             }
+            long start = System.nanoTime();
             return fallback.stream(prompt)
-                    .doOnError(ex -> ollamaCb.onError(0, java.util.concurrent.TimeUnit.MILLISECONDS, ex));
+                    .doOnComplete(() -> ollamaCb.onSuccess(System.nanoTime() - start, java.util.concurrent.TimeUnit.NANOSECONDS))
+                    .doOnError(ex -> ollamaCb.onError(System.nanoTime() - start, java.util.concurrent.TimeUnit.NANOSECONDS, ex));
         }
     }
 }

@@ -21,7 +21,7 @@ import java.util.List;
 
 @Tag(name = "树洞", description = "用户私密树洞记录的创建、查询与删除")
 @RestController
-@RequestMapping("/treeholes")
+@RequestMapping("/api/treeholes")
 public class TreeholeController {
 
     private final TreeholeService treeholeService;

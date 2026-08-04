@@ -8,6 +8,9 @@ export default function Eval() {
   const [runs, setRuns] = useState<EvalRun[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
+  const [showRunForm, setShowRunForm] = useState(false)
+  const [runName, setRunName] = useState('')
+  const [running, setRunning] = useState(false)
   const [newCase, setNewCase] = useState({ name: '', input: '', expectedOutput: '', tags: '' })
   const [casesPage, setCasesPage] = useState(1)
   const [casesPageSize, setCasesPageSize] = useState(20)
@@ -76,18 +79,19 @@ export default function Eval() {
   }
 
   const handleStartRun = async () => {
-    const name = prompt('请输入评测运行名称：')
-    if (!name) return
-
+    if (!runName.trim()) return
+    setRunning(true)
     try {
-      const res = await evalApi.startRun(name)
+      const res = await evalApi.startRun(runName.trim())
       if (res.code === 0) {
         setRuns(prev => [res.data, ...prev])
-        alert('评测运行已启动')
+        setRunName('')
+        setShowRunForm(false)
       }
     } catch (err) {
       console.error('Failed to start run', err)
-      alert('启动失败')
+    } finally {
+      setRunning(false)
     }
   }
 
@@ -100,13 +104,45 @@ export default function Eval() {
           <p className="text-slate-400 mt-2">管理测试用例和运行评测</p>
         </div>
         <button
-          onClick={handleStartRun}
+          onClick={() => setShowRunForm(!showRunForm)}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-slate-900 btn-gradient"
         >
           <Play size={18} />
           运行评测
         </button>
       </div>
+
+      {/* Run Form */}
+      {showRunForm && (
+        <div className="glass rounded-xl p-6 animate-fade-in">
+          <div className="flex gap-3 items-end">
+            <div className="flex-1">
+              <label className="block text-sm text-slate-300 mb-2">评测运行名称</label>
+              <input
+                type="text"
+                value={runName}
+                onChange={e => setRunName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleStartRun()}
+                placeholder="例如：回归测试 v1.2"
+                className="w-full px-4 py-2.5 rounded-lg text-sm"
+              />
+            </div>
+            <button
+              onClick={handleStartRun}
+              disabled={running || !runName.trim()}
+              className="px-6 py-2.5 rounded-lg text-sm font-semibold text-slate-900 btn-gradient disabled:opacity-50"
+            >
+              {running ? '启动中...' : '启动'}
+            </button>
+            <button
+              onClick={() => setShowRunForm(false)}
+              className="px-4 py-2.5 rounded-lg text-sm text-slate-400 hover:bg-white/5"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Test Cases */}
       <div className="glass rounded-xl p-6">

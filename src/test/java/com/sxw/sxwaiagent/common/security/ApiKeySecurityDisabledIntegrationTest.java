@@ -27,14 +27,14 @@ class ApiKeySecurityDisabledIntegrationTest {
 
     @Test
     void healthEndpointIsPubliclyAccessible() throws Exception {
-        mockMvc.perform(get("/health"))
+        mockMvc.perform(get("/api/health"))
                 .andExpect(status().isOk());
     }
 
     @Test
     void businessEndpointsRequireJwtAuthentication() throws Exception {
         // API Key 关闭后，业务端点仍需 JWT；无 token 应返回 401
-        mockMvc.perform(get("/agent/traces/chat-a"))
+        mockMvc.perform(get("/api/agent/traces/chat-a"))
                 .andExpect(status().isUnauthorized());
     }
 }

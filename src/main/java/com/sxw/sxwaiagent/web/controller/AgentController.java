@@ -149,12 +149,10 @@ public class AgentController {
         
         // 加载历史消息
         List<Message> history = List.of();
-        if (chatId != null && !chatId.isBlank()) {
-            try {
-                history = chatMemory.get(chatId);
-            } catch (Exception e) {
-                log.warn("[{}] Failed to load history for chatId={}: {}", requestId, chatId, e.getMessage());
-            }
+        try {
+            history = chatMemory.get(chatId);
+        } catch (Exception e) {
+            log.warn("[{}] Failed to load history for chatId={}: {}", requestId, chatId, e.getMessage());
         }
         
         // 构建上下文

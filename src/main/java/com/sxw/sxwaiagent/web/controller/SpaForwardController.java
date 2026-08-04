@@ -17,6 +17,8 @@ public class SpaForwardController {
         "/eval", "/eval/**",
         "/skills", "/skills/**",
         "/traces", "/traces/**",
+        "/hermes", "/hermes/**",
+        "/knowledge", "/knowledge/**",
         "/dashboard", "/dashboard/**",
         "/login"
     })

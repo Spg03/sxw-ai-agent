@@ -10,6 +10,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 全局异常处理：把各类异常统一包装为 {@link Result}，避免裸 String / 堆栈外泄。
@@ -30,6 +31,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<Void>> handleValidation(Exception ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Result.error(40002, ex.getMessage()));
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Result<Void>> handleNoResource(NoResourceFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Result.error(40400, "not found: " + ex.getMessage()));
     }
 
     @ExceptionHandler(Exception.class)

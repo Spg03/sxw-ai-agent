@@ -30,20 +30,20 @@ class ApiKeySecurityEnabledIntegrationTest {
 
     @Test
     void protectedEndpointsRejectRequestsWithoutApiKey() throws Exception {
-        mockMvc.perform(get("/agent/traces/chat-a"))
+        mockMvc.perform(get("/api/agent/traces/chat-a"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     void protectedEndpointsRejectRequestsWithWrongApiKey() throws Exception {
-        mockMvc.perform(get("/agent/traces/chat-a")
+        mockMvc.perform(get("/api/agent/traces/chat-a")
                         .header(ApiKeyInterceptor.HEADER_NAME, "wrong-secret"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     void protectedEndpointsAllowRequestsWithCorrectApiKey() throws Exception {
-        mockMvc.perform(get("/agent/traces/chat-a")
+        mockMvc.perform(get("/api/agent/traces/chat-a")
                         .header(ApiKeyInterceptor.HEADER_NAME, "test-secret"))
                 .andExpect(status().isOk());
     }

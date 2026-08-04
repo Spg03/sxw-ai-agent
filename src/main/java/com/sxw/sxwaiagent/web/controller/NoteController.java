@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @Tag(name = "笔记管理", description = "笔记的创建、读取、追加、搜索与删除")
 @RestController
-@RequestMapping("/notes")
+@RequestMapping("/api/notes")
 @Validated
 public class NoteController {
 

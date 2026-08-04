@@ -1,7 +1,7 @@
 {
-  "name": "frontend",
+  "name": "agentforge-console",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,9 @@
     "lucide-react": "^1.23.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.1"
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.18.1",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.11",

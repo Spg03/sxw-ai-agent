@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { dashboardApi, type DashboardStats } from '../api/dashboard'
 import { notesApi } from '../api/notes'
@@ -8,9 +9,11 @@ import { MessageSquare, Heart, StickyNote, TestTube, Activity, TrendingUp } from
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [recentActivities, setRecentActivities] = useState<Array<{ type: string; text: string; time: string }>>([])
   const [loading, setLoading] = useState(true)
+  const [apiStatus, setApiStatus] = useState<'checking' | 'up' | 'down'>('checking')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -64,6 +67,11 @@ export default function Dashboard() {
       }
 
       setRecentActivities(activities.slice(0, 5))
+
+      // 真实健康检查
+      dashboardApi.healthCheck({ signal })
+        .then(() => setApiStatus('up'))
+        .catch(() => setApiStatus('down'))
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
       console.error('Failed to load dashboard data', err)
@@ -191,7 +199,7 @@ export default function Dashboard() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <button 
-              onClick={() => window.location.href = '/chat'}
+              onClick={() => navigate('/chat')}
               className="p-4 rounded-lg bg-gradient-to-br from-rose-500/20 to-pink-500/20 border border-rose-500/30 hover:border-rose-500/50 transition-all text-left"
             >
               <MessageSquare className="text-rose-400 mb-2" size={24} />
@@ -199,7 +207,7 @@ export default function Dashboard() {
               <div className="text-xs text-slate-400 mt-1">与 AI 助手聊天</div>
             </button>
             <button 
-              onClick={() => window.location.href = '/treehole'}
+              onClick={() => navigate('/treehole')}
               className="p-4 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 hover:border-amber-500/50 transition-all text-left"
             >
               <Heart className="text-amber-400 mb-2" size={24} />
@@ -207,7 +215,7 @@ export default function Dashboard() {
               <div className="text-xs text-slate-400 mt-1">记录心情</div>
             </button>
             <button 
-              onClick={() => window.location.href = '/notes'}
+              onClick={() => navigate('/notes')}
               className="p-4 rounded-lg bg-gradient-to-br from-sky-500/20 to-blue-500/20 border border-sky-500/30 hover:border-sky-500/50 transition-all text-left"
             >
               <StickyNote className="text-sky-400 mb-2" size={24} />
@@ -215,7 +223,7 @@ export default function Dashboard() {
               <div className="text-xs text-slate-400 mt-1">记录想法</div>
             </button>
             <button 
-              onClick={() => window.location.href = '/eval'}
+              onClick={() => navigate('/eval')}
               className="p-4 rounded-lg bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 hover:border-emerald-500/50 transition-all text-left"
             >
               <TestTube className="text-emerald-400 mb-2" size={24} />
@@ -232,24 +240,30 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="p-4 rounded-lg bg-white/5">
             <div className="flex items-center gap-2 mb-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-400 pulse-dot" />
+              <div className={`w-2 h-2 rounded-full ${apiStatus === 'up' ? 'bg-emerald-400 pulse-dot' : apiStatus === 'down' ? 'bg-rose-400' : 'bg-amber-400 animate-pulse'}`} />
               <span className="text-sm text-slate-300">API 服务</span>
             </div>
-            <div className="text-xs text-slate-500">运行正常</div>
+            <div className="text-xs text-slate-500">
+              {apiStatus === 'up' ? '运行正常' : apiStatus === 'down' ? '连接失败' : '检测中...'}
+            </div>
           </div>
           <div className="p-4 rounded-lg bg-white/5">
             <div className="flex items-center gap-2 mb-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-400 pulse-dot" />
+              <div className={`w-2 h-2 rounded-full ${apiStatus === 'up' ? 'bg-emerald-400 pulse-dot' : apiStatus === 'down' ? 'bg-rose-400' : 'bg-amber-400 animate-pulse'}`} />
               <span className="text-sm text-slate-300">LLM 服务</span>
             </div>
-            <div className="text-xs text-slate-500">运行正常 · 可用</div>
+            <div className="text-xs text-slate-500">
+              {apiStatus === 'up' ? '已就绪 · 通过 API 检测' : apiStatus === 'down' ? '未知 · API 不可达' : '检测中...'}
+            </div>
           </div>
           <div className="p-4 rounded-lg bg-white/5">
             <div className="flex items-center gap-2 mb-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-400 pulse-dot" />
+              <div className={`w-2 h-2 rounded-full ${apiStatus === 'up' ? 'bg-emerald-400 pulse-dot' : apiStatus === 'down' ? 'bg-rose-400' : 'bg-amber-400 animate-pulse'}`} />
               <span className="text-sm text-slate-300">数据库</span>
             </div>
-            <div className="text-xs text-slate-500">运行正常 · 已连接</div>
+            <div className="text-xs text-slate-500">
+              {apiStatus === 'up' ? '已连接 · 通过 API 检测' : apiStatus === 'down' ? '未知 · API 不可达' : '检测中...'}
+            </div>
           </div>
         </div>
       </div>

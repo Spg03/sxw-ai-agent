@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "健康检查", description = "应用存活探针")
 @RestController
-@RequestMapping("/health")
+@RequestMapping("/api/health")
 public class HealthController {
 
     @Operation(summary = "健康检查", description = "返回应用状态和时间戳")

@@ -47,7 +47,7 @@ export default function Login() {
               {isRegister ? '创建账号' : '欢迎回来'}
             </h1>
             <p className="text-sm text-slate-400 mt-2">
-              {isRegister ? '开始你的 AI 助手之旅' : '登录到你的 SXW AI Agent'}
+              {isRegister ? '开始你的 AI 助手之旅' : '登录到你的 AgentForge'}
             </p>
           </div>
 

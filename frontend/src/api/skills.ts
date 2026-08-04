@@ -12,6 +12,6 @@ export interface Skill {
 }
 
 export const skillsApi = {
-  list: () => api.get<SkillSummary[]>('/skills'),
-  get: (name: string) => api.get<Skill>(`/skills/${name}`),
+  list: (options?: { signal?: AbortSignal }) => api.get<SkillSummary[]>('/skills', options),
+  get: (name: string, options?: { signal?: AbortSignal }) => api.get<Skill>(`/skills/${name}`, options),
 }

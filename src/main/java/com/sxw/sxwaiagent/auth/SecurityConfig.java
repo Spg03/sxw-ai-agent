@@ -58,9 +58,9 @@ public class SecurityConfig {
                         auth
                         // ─── 公开端点：无需认证 ───
                         // 登录/注册/刷新 token
-                        .requestMatchers("/auth/register", "/auth/login", "/auth/refresh").permitAll()
+                        .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
                         // 应用健康检查
-                        .requestMatchers("/health").permitAll()
+                        .requestMatchers("/api/health").permitAll()
                         // Actuator 健康检查 + 基本信息（K8s 探针、运维监控）
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
                         // Spring 默认错误页面
@@ -82,11 +82,11 @@ public class SecurityConfig {
                         }
 
                         // ─── 其余所有请求：需要 JWT 认证 ───
-                        // 包括：/ai/**, /notes/**, /skills/**, /agents/**,
+                        // 包括：/api/ai/**, /api/notes/**, /api/skills/**, /api/agents/**,
                         //       /api/agent/**, /api/traces/**, /api/dashboard/**,
                         //       /api/eval/**, /api/hermes/**, /api/plans/**,
-                        //       /api/knowledge/**, /treeholes/**, /agent/traces/**,
-                        //       /sse, /mcp/message, /auth/me, /auth/logout 等
+                        //       /api/knowledge/**, /api/treeholes/**,
+                        //       /sse, /mcp/message, /api/auth/me, /api/auth/logout 等
                         auth.anyRequest().authenticated();
                 })
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)

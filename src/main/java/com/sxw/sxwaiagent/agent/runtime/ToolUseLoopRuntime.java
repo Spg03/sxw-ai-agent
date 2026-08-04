@@ -26,6 +26,7 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -82,6 +83,7 @@ public class ToolUseLoopRuntime implements AgentRuntime {
     private final ChatModel chatModel;
     private final ToolExecutor toolExecutor;
     private final ApplicationEventPublisher eventPublisher;
+    private final ChatMemory chatMemory;
     private final PromptAssembler promptAssembler;
     private final PromptRunRecorder promptRunRecorder;
     private final Executor agentTaskExecutor;
@@ -111,6 +113,7 @@ public class ToolUseLoopRuntime implements AgentRuntime {
             ChatModel chatModel,
             ToolExecutor toolExecutor,
             ApplicationEventPublisher eventPublisher,
+            ChatMemory agentChatMemory,
             PromptAssembler promptAssembler,
             PromptRunRecorder promptRunRecorder,
             @Qualifier("agentTaskExecutor") Executor agentTaskExecutor,
@@ -122,6 +125,7 @@ public class ToolUseLoopRuntime implements AgentRuntime {
         this.chatModel = chatModel;
         this.toolExecutor = toolExecutor;
         this.eventPublisher = eventPublisher;
+        this.chatMemory = agentChatMemory;
         this.promptAssembler = promptAssembler;
         this.promptRunRecorder = promptRunRecorder;
         this.agentTaskExecutor = agentTaskExecutor;
@@ -547,6 +551,9 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                     log.warn("[{}] SSE complete failed: {}", context.requestId(), e.getMessage());
                 }
             }
+
+            // 流式请求也必须持久化，否则下一轮无法带上历史上下文。
+            saveStreamMessages(context, finalAnswer);
             
             // 发布事件
             AgentResponse response = AgentResponse.builder()
@@ -590,6 +597,22 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                     emitter.completeWithError(ex);
                 }
             }
+        }
+    }
+
+    private void saveStreamMessages(AgentContext context, String answer) {
+        if (context.chatId() == null || context.chatId().isBlank()) {
+            return;
+        }
+        try {
+            List<Message> messages = new ArrayList<>();
+            messages.add(new UserMessage(context.userMessage()));
+            if (answer != null && !answer.isBlank()) {
+                messages.add(new AssistantMessage(answer));
+            }
+            chatMemory.add(context.chatId(), messages);
+        } catch (Exception e) {
+            log.warn("[{}] Failed to save streaming chat memory: {}", context.requestId(), e.getMessage());
         }
     }
     

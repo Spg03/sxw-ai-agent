@@ -8,16 +8,19 @@ export default function Skills() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    loadSkills()
+    const controller = new AbortController()
+    loadSkills(controller.signal)
+    return () => controller.abort()
   }, [])
 
-  const loadSkills = async () => {
+  const loadSkills = async (signal?: AbortSignal) => {
     try {
-      const res = await skillsApi.list()
+      const res = await skillsApi.list({ signal })
       if (res.code === 0) {
         setSkills(res.data)
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       console.error('Failed to load skills', err)
     } finally {
       setLoading(false)

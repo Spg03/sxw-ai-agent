@@ -19,7 +19,7 @@ import java.util.List;
  */
 @Tag(name = "技能管理", description = "Agent 技能的查询与详情展示")
 @RestController
-@RequestMapping("/skills")
+@RequestMapping("/api/skills")
 public class SkillController {
 
     @Resource

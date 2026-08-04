@@ -20,7 +20,7 @@ import java.util.List;
 
 @Tag(name = "Agent 追踪", description = "Agent 执行追踪记录查询")
 @RestController
-@RequestMapping("/agent/traces")
+@RequestMapping("/api/agent/traces")
 @Validated
 public class AgentTraceController {
 

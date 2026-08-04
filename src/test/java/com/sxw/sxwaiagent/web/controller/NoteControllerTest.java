@@ -40,7 +40,7 @@ class NoteControllerTest {
     @Test
     void createReadListAndDelete() throws Exception {
         // create
-        mockMvc.perform(post("/notes")
+        mockMvc.perform(post("/api/notes")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"title\":\"hello\",\"content\":\"# hi\"}"))
                 .andExpect(status().isOk())
@@ -48,23 +48,23 @@ class NoteControllerTest {
                 .andExpect(jsonPath("$.data").value(org.hamcrest.Matchers.startsWith("ok:")));
 
         // read
-        mockMvc.perform(get("/notes").param("title", "hello"))
+        mockMvc.perform(get("/api/notes").param("title", "hello"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").value("# hi"));
 
         // list
-        mockMvc.perform(get("/notes/list"))
+        mockMvc.perform(get("/api/notes/list"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").value(org.hamcrest.Matchers.containsString("hello")));
 
         // delete
-        mockMvc.perform(delete("/notes").param("title", "hello"))
+        mockMvc.perform(delete("/api/notes").param("title", "hello"))
                 .andExpect(status().isOk());
     }
 
     @Test
     void rejectsPathTraversalWith400() throws Exception {
-        mockMvc.perform(post("/notes")
+        mockMvc.perform(post("/api/notes")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"title\":\"../evil\",\"content\":\"x\"}"))
                 .andExpect(status().isBadRequest())

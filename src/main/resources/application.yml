@@ -4,13 +4,13 @@ spring:
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/sxw_ai_agent}
+    url: ${DATABASE_URL:jdbc:postgresql://192.168.26.131:5432/sxw_ai_agent}
     username: ${DATABASE_USERNAME:postgres}
     password: ${DATABASE_PASSWORD:}
     driver-class-name: org.postgresql.Driver
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
+      host: ${REDIS_HOST:192.168.26.131}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       timeout: 3000ms
@@ -55,8 +55,6 @@ spring:
 #          servers-configuration: classpath:mcp-servers.json
 server:
   port: ${SERVER_PORT:8123}
-  servlet:
-    context-path: /api/v1
 # springdoc-openapi config
 springdoc:
   swagger-ui:
@@ -199,10 +197,10 @@ resilience4j:
     instances:
       ragflow:
         timeout-duration: 10s
-# 修改日志级别，查看 Spring AI 更多调用细节
+# 修改日志级别，查看 Spring AI 更多调用细节（生产环境建议设为 INFO）
 logging:
   level:
-    org.springframework.ai: DEBUG
+    org.springframework.ai: ${SPRING_AI_LOG_LEVEL:INFO}
     org.springframework.ai.retry.autoconfigure.SpringAiRetryAutoConfiguration: 'OFF'
     com.alibaba.cloud.ai.dashscope.embedding.DashScopeEmbeddingModel: 'OFF'
 # Actuator 端点（健康检查 + Prometheus 指标）
@@ -222,10 +220,10 @@ management:
     metrics:
       export:
         enabled: true
-  # 分布式追踪（Micrometer Tracing + OTel OTLP）
+  # 分布式追踪（Micrometer Tracing + OTel OTLP），本地默认关闭
   tracing:
     sampling:
-      probability: ${TRACING_SAMPLE_RATE:1.0}
+      probability: ${TRACING_SAMPLE_RATE:0.0}
   otlp:
     tracing:
       endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}/v1/traces

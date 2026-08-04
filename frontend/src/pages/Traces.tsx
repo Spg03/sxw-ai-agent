@@ -40,8 +40,8 @@ export default function Traces() {
       if (res.code === 0) {
         const data = res.data ?? []
         setTraces(data)
-        // 如果后端返回了总数，可据此计算总页数；此处用简单估算
-        setTotalPages(Math.max(1, Math.ceil(data.length / pageSize) || 1))
+        // 后端已分页，根据返回数量估算是否还有更多页
+        setTotalPages(data.length >= pageSize ? page + 1 : page)
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return

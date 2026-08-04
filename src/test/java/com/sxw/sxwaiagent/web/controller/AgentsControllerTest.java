@@ -21,7 +21,7 @@ class AgentsControllerTest {
                 new AgentsController(mock(ClassicAgentService.class), mock(HermesAgent.class))
         ).build();
 
-        mockMvc.perform(get("/agents/modes"))
+        mockMvc.perform(get("/api/agents/modes"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].id").value("classic"))
                 .andExpect(jsonPath("$.data[1].id").value("hermes"));
@@ -35,7 +35,7 @@ class AgentsControllerTest {
                 new AgentsController(classicAgentService, mock(HermesAgent.class))
         ).build();
 
-        mockMvc.perform(get("/agents/classic/chat")
+        mockMvc.perform(get("/api/agents/classic/chat")
                         .param("message", "hello")
                         .param("chatId", "chat-1")
                         .param("mode", "ragflow"))
@@ -52,7 +52,7 @@ class AgentsControllerTest {
                 new AgentsController(mock(ClassicAgentService.class), hermesAgent)
         ).build();
 
-        mockMvc.perform(get("/agents/hermes/chat")
+        mockMvc.perform(get("/api/agents/hermes/chat")
                         .param("message", "今天很累")
                         .param("chatId", "chat-1"))
                 .andExpect(status().isOk())

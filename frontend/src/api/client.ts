@@ -6,7 +6,7 @@ interface Result<T> {
   data: T
 }
 
-interface RequestOptions {
+export interface RequestOptions {
   signal?: AbortSignal
 }
 

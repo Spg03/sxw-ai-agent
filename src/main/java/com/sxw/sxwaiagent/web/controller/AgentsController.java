@@ -17,7 +17,7 @@ import java.util.List;
 
 @Tag(name = "经典 Agent", description = "传统工具型 Agent 和 Hermes 陡伴 Agent 接口")
 @RestController
-@RequestMapping("/agents")
+@RequestMapping("/api/agents")
 public class AgentsController {
 
     private final ClassicAgentService classicAgentService;
