@@ -24,6 +24,9 @@ import org.springframework.web.bind.annotation.RestController;
 @Validated
 public class NoteController {
 
+    // TODO(notes-workspace): 增加用户范围的笔记元数据、标签、收藏、关联笔记、引用追踪、
+    // 导出、分享协作和 AI 写作辅助接口；当前 API 仅支持 Markdown 文件的基础 CRUD。
+
     private final NoteSkill noteSkill;
 
     public NoteController(NoteSkill noteSkill) {

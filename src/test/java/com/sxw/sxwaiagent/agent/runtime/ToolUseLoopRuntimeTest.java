@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -55,6 +56,7 @@ class ToolUseLoopRuntimeTest {
     @Mock private ChatModel chatModel;
     @Mock private ToolExecutor toolExecutor;
     @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private ChatMemory chatMemory;
     @Mock private PromptAssembler promptAssembler;
     @Mock private PromptRunRecorder promptRunRecorder;
     @Mock private PlanReviewService planReviewService;
@@ -75,7 +77,7 @@ class ToolUseLoopRuntimeTest {
                 .build());
 
         runtime = new ToolUseLoopRuntime(
-                chatModel, toolExecutor, eventPublisher,
+                chatModel, toolExecutor, eventPublisher, chatMemory,
                 promptAssembler, promptRunRecorder,
                 Executors.newSingleThreadExecutor(),
                 retryRegistry, cbRegistry,

@@ -24,6 +24,9 @@ import java.util.List;
 @RequestMapping("/api/treeholes")
 public class TreeholeController {
 
+    // TODO(treehole-workspace): 增加情绪标签写入、语音转文字、AI 陪伴引导、
+    // 心情趋势 / 日历统计、写作灵感、收藏与归档等接口；当前仅提供基础树洞 CRUD。
+
     private final TreeholeService treeholeService;
 
     public TreeholeController(TreeholeService treeholeService) {

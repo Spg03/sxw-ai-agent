@@ -6,7 +6,24 @@ export interface AgentRequest {
   message: string
   stream?: boolean
   metadata?: Record<string, any>
+  mode?: 'CHAT' | 'PLAN' | 'EXECUTE'
+  planId?: string
+  enabledTools?: string[]
+  webSearchEnabled?: boolean
+  attachmentIds?: string[]
 }
+
+export interface ConversationSummary {
+  conversationId: string
+  title: string
+  profile: 'LOVE' | 'GENERAL' | 'HERMES'
+  pinned: boolean
+  rollingSummary?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConversationMessage { id: number; role: string; content: string; createdAt: string }
 
 export interface AgentResponse {
   requestId: string
@@ -77,6 +94,12 @@ export const agentApi = {
   chat: (req: AgentRequest) => api.post<AgentResponse>('/agent/chat', req),
   modes: () => api.get<AgentMode[]>('/agent/profiles'),
   clearMemory: (chatId: string) => api.delete<void>(`/agent/chat/${chatId}/memory`),
+  listConversations: () => api.get<ConversationSummary[]>('/conversations'),
+  createConversation: (profile: ConversationSummary['profile'] = 'GENERAL', title?: string) => api.post<ConversationSummary>('/conversations', { profile, title }),
+  conversationMessages: (id: string) => api.get<ConversationMessage[]>(`/conversations/${encodeURIComponent(id)}/messages`),
+  updateConversation: (id: string, body: Partial<Pick<ConversationSummary, 'title' | 'profile' | 'pinned'>>) => api.patch<ConversationSummary>(`/conversations/${encodeURIComponent(id)}`, body),
+  deleteConversation: (id: string) => api.delete<void>(`/conversations/${encodeURIComponent(id)}`),
+  tools: (profile: string) => api.get<Array<{name: string; description: string; riskLevel: string; requiresApproval: boolean}>>(`/agent/tools?profile=${encodeURIComponent(profile)}`),
 
   /**
    * SSE 流式对话

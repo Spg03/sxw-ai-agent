@@ -53,7 +53,8 @@ public class AuthService {
         return buildAuthResponse(saved.getUsername(), UserView.from(saved));
     }
 
-    @Transactional(readOnly = true)
+    // 登录成功后会创建并保存 refresh token，因此必须使用可写事务。
+    @Transactional
     public AuthResponse login(LoginRequest request) {
         UserAccount user = userAccountRepository.findByUsername(request.username().trim())
                 .filter(UserAccount::isEnabled)

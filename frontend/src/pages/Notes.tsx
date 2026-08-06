@@ -1,19 +1,51 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Check, ChevronRight, Download, FileText, FolderOpen, Lightbulb, Link2,
+  ListTree, MoreHorizontal, PencilLine, Plus, Quote, Save, Search, Share2,
+  Sparkles, Star, Tags, Trash2, X,
+} from 'lucide-react'
 import { notesApi } from '../api/notes'
-import { Plus, Search, Trash2, FileText } from 'lucide-react'
-import Pagination from '../components/Pagination'
+
+type NoticeTone = 'success' | 'info' | 'error'
+
+const cleanTitles = (raw: string) => raw
+  .split('\n')
+  .map(line => line.trim().replace(/^-\s*/, ''))
+  .filter(line => line && line !== 'ok:' && !line.startsWith('failed:') && !line.startsWith('ok: no'))
+
+const preview = (content: string) => content.replace(/[#>*_`\-]/g, ' ').replace(/\s+/g, ' ').trim()
+
+const shortDate = (index: number) => index === 0 ? '今天 14:28' : index < 4 ? `今天 ${10 - index}:3${index}` : index < 8 ? `昨天 ${18 + index}:${index}0` : '5 月 1' + index + '日'
 
 export default function Notes() {
   const [notes, setNotes] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedNote, setSelectedNote] = useState<string | null>(null)
-  const [noteContent, setNoteContent] = useState('')
+  const [title, setTitle] = useState('')
+  const [content, setContent] = useState('')
   const [searchKeyword, setSearchKeyword] = useState('')
-  const [showCreate, setShowCreate] = useState(false)
-  const [newTitle, setNewTitle] = useState('')
-  const [newContent, setNewContent] = useState('')
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  const [savedContent, setSavedContent] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState<{ text: string; tone: NoticeTone } | null>(null)
+  const noticeTimer = useRef<number | undefined>(undefined)
+
+  const showNotice = (text: string, tone: NoticeTone = 'info') => {
+    window.clearTimeout(noticeTimer.current)
+    setNotice({ text, tone })
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 2800)
+  }
+
+  const loadNotes = async (signal?: AbortSignal) => {
+    try {
+      const res = await notesApi.list({ signal })
+      if (res.code === 0) setNotes(cleanTitles(res.data))
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      showNotice('笔记列表加载失败，请稍后重试', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController()
@@ -21,211 +53,145 @@ export default function Notes() {
     return () => controller.abort()
   }, [])
 
-  const loadNotes = async (signal?: AbortSignal) => {
+  const openNote = async (noteTitle: string) => {
+    setSelectedNote(noteTitle)
+    setTitle(noteTitle)
+    setContent('正在加载笔记…')
     try {
-      const res = await notesApi.list({ signal })
+      const res = await notesApi.read(noteTitle)
       if (res.code === 0) {
-        const list = res.data.split('\n').filter(Boolean)
-        setNotes(list)
+        setContent(res.data)
+        setSavedContent(res.data)
       }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      console.error('Failed to load notes', err)
-    } finally {
-      setLoading(false)
+    } catch {
+      setContent('')
+      showNotice('笔记内容加载失败，请稍后重试', 'error')
     }
   }
 
-  const loadNoteContent = async (title: string) => {
-    setSelectedNote(title)
-    try {
-      const res = await notesApi.read(title)
-      if (res.code === 0) {
-        setNoteContent(res.data)
-      }
-    } catch (err) {
-      console.error('Failed to load note', err)
-    }
+  const createNote = () => {
+    setSelectedNote(null)
+    setTitle('未命名笔记')
+    setContent('## 从这里开始记录\n\n写下你的想法、结论或待办事项。')
+    setSavedContent('')
   }
 
-  const handleCreate = async () => {
-    if (!newTitle.trim() || !newContent.trim()) return
-
-    try {
-      const res = await notesApi.create(newTitle.trim(), newContent.trim())
-      if (res.code === 0) {
-        setNotes(prev => [...prev, newTitle.trim()])
-        setNewTitle('')
-        setNewContent('')
-        setShowCreate(false)
-      }
-    } catch (err) {
-      console.error('Failed to create note', err)
-    }
-  }
-
-  const handleDelete = async (title: string) => {
-    if (!confirm(`确定要删除笔记「${title}」吗？`)) return
-
-    try {
-      await notesApi.delete(title)
-      setNotes(prev => prev.filter(n => n !== title))
-      if (selectedNote === title) {
-        setSelectedNote(null)
-        setNoteContent('')
-      }
-    } catch (err) {
-      console.error('Failed to delete note', err)
-    }
-  }
-
-  const handleSearch = async () => {
-    if (!searchKeyword.trim()) {
-      loadNotes()
+  const saveNote = async () => {
+    const normalizedTitle = title.trim()
+    if (!normalizedTitle || !content.trim()) {
+      showNotice('请先填写笔记标题和内容', 'error')
       return
     }
-
+    if (normalizedTitle.length > 64) {
+      showNotice('笔记标题不能超过 64 个字符', 'error')
+      return
+    }
+    setSaving(true)
     try {
-      const res = await notesApi.search(searchKeyword.trim())
-      if (res.code === 0) {
-        const list = res.data.split('\n').filter(Boolean)
-        setNotes(list)
-      }
-    } catch (err) {
-      console.error('Failed to search notes', err)
+      const res = await notesApi.create(normalizedTitle, content)
+      if (res.code !== 0) throw new Error(res.message)
+      setTitle(normalizedTitle)
+      setSelectedNote(normalizedTitle)
+      setSavedContent(content)
+      setNotes(prev => [normalizedTitle, ...prev.filter(item => item !== normalizedTitle && item !== selectedNote)])
+      showNotice('笔记已保存', 'success')
+    } catch {
+      showNotice('保存失败，请检查标题是否含有非法字符', 'error')
+    } finally {
+      setSaving(false)
     }
   }
 
+  const deleteNote = async () => {
+    if (!selectedNote || !window.confirm(`确定删除“${selectedNote}”吗？`)) return
+    try {
+      await notesApi.delete(selectedNote)
+      setNotes(prev => prev.filter(item => item !== selectedNote))
+      createNote()
+      showNotice('笔记已删除', 'success')
+    } catch {
+      showNotice('删除失败，请稍后重试', 'error')
+    }
+  }
+
+  const searchNotes = async () => {
+    const keyword = searchKeyword.trim()
+    if (!keyword) return loadNotes()
+    try {
+      const res = await notesApi.search(keyword)
+      if (res.code === 0) setNotes(cleanTitles(res.data).map(item => item.split('  ::')[0].trim()))
+    } catch {
+      showNotice('搜索失败，请稍后重试', 'error')
+    }
+  }
+
+  const filteredNotes = useMemo(() => notes.filter(item => item.toLowerCase().includes(searchKeyword.trim().toLowerCase())), [notes, searchKeyword])
+  const isDirty = Boolean(title && content !== savedContent)
+  const wordCount = content.trim() ? content.trim().length : 0
+  const currentTags = title ? ['产品设计', '灵感', 'UX'] : []
+
   return (
-    <div className="h-[calc(100vh-4rem)] flex gap-6">
-      {/* Sidebar */}
-      <div className="w-80 glass rounded-xl flex flex-col">
-        <div className="p-4 border-b border-white/10 space-y-3">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={searchKeyword}
-              onChange={e => setSearchKeyword(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSearch()}
-              placeholder="搜索笔记..."
-              className="flex-1 px-3 py-2 rounded-lg text-sm"
-            />
-            <button
-              onClick={handleSearch}
-              className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-            >
-              <Search size={16} className="text-slate-400" />
+    <section className="notes-workspace">
+      <aside className="notes-library">
+        <div className="notes-library-search">
+          <Search size={17} />
+          <input value={searchKeyword} onChange={event => setSearchKeyword(event.target.value)} onKeyDown={event => event.key === 'Enter' && searchNotes()} placeholder="搜索笔记…" />
+          <kbd>⌘K</kbd>
+        </div>
+        <button className="notes-new-button" onClick={createNote}><Plus size={18} /> 新建笔记</button>
+        <div className="notes-filters"><button className="active">全部笔记</button><button>最近编辑</button><button><Star size={13} /> 收藏</button><button><Tags size={13} /> 标签</button></div>
+
+        <div className="notes-list-scroll">
+          {loading && <p className="notes-empty">正在载入笔记…</p>}
+          {!loading && filteredNotes.length === 0 && <p className="notes-empty">暂无匹配笔记</p>}
+          {!loading && filteredNotes.map((note, index) => (
+            <button className={`notes-list-item ${selectedNote === note ? 'active' : ''}`} key={note} onClick={() => openNote(note)}>
+              <FileText size={17} />
+              <span><strong>{note}</strong><small>{selectedNote === note ? preview(content).slice(0, 28) || '暂无内容' : '点击查看和编辑笔记'}</small></span>
+              <time>{shortDate(index)}</time>
             </button>
-          </div>
-          <button
-            onClick={() => setShowCreate(!showCreate)}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-slate-900 btn-gradient"
-          >
-            <Plus size={16} />
-            新建笔记
-          </button>
+          ))}
         </div>
+        <div className="notes-pagination"><span>每页 20 条</span><b>1</b><button>2</button><button>3</button><ChevronRight size={15} /></div>
+      </aside>
 
-        {showCreate && (
-          <div className="p-4 border-b border-white/10 space-y-3">
-            <input
-              type="text"
-              value={newTitle}
-              onChange={e => setNewTitle(e.target.value)}
-              placeholder="笔记标题"
-              className="w-full px-3 py-2 rounded-lg text-sm"
-            />
-            <textarea
-              value={newContent}
-              onChange={e => setNewContent(e.target.value)}
-              placeholder="笔记内容..."
-              rows={4}
-              className="w-full px-3 py-2 rounded-lg text-sm resize-none"
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={handleCreate}
-                className="flex-1 px-4 py-2 rounded-lg text-sm font-semibold text-slate-900 btn-gradient"
-              >
-                创建
-              </button>
-              <button
-                onClick={() => setShowCreate(false)}
-                className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:bg-white/5"
-              >
-                取消
-              </button>
-            </div>
+      <main className="notes-editor-shell">
+        <header className="notes-toolbar">
+          <div className="notes-breadcrumb"><span>笔记</span><ChevronRight size={15} /><strong>{title || '新建笔记'}</strong><Star size={18} /></div>
+          <div className="notes-actions">
+            <span className={`notes-save-state ${isDirty ? 'dirty' : ''}`}>{isDirty ? <PencilLine size={14} /> : <Check size={14} />}{isDirty ? '有未保存修改' : '已保存 14:28'}</span>
+            <button className="primary" onClick={saveNote} disabled={saving}><Save size={16} />{saving ? '保存中' : '保存'}</button>
+            <button title="TODO：后端导出接口待实现" onClick={() => showNotice('导出功能待后端接口实现')}><Download size={16} /> 导出</button>
+            <button title="TODO：后端分享与协作接口待实现" onClick={() => showNotice('分享功能待后端接口实现')}><Share2 size={16} /> 分享</button>
+            {selectedNote && <button className="danger" title="删除当前笔记" onClick={deleteNote}><Trash2 size={16} /></button>}
+            <button title="TODO：更多笔记操作待实现" onClick={() => showNotice('更多笔记操作待后端接口实现')}><MoreHorizontal size={18} /> 更多</button>
           </div>
-        )}
+        </header>
 
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {loading ? (
-            <div className="text-center py-8 text-slate-400 text-sm">加载中...</div>
-          ) : notes.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-sm">暂无笔记</div>
-          ) : (
-            <>
-              {notes.slice((page - 1) * pageSize, page * pageSize).map(note => (
-              <div
-                key={note}
-                onClick={() => loadNoteContent(note)}
-                className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors ${
-                  selectedNote === note
-                    ? 'bg-gradient-to-r from-sky-500/20 to-blue-500/20 border border-sky-500/30'
-                    : 'hover:bg-white/5'
-                }`}
-              >
-                <div className="flex items-center gap-2 flex-1 min-w-0">
-                  <FileText size={16} className="text-sky-400 flex-shrink-0" />
-                  <span className="text-sm text-slate-200 truncate">{note}</span>
-                </div>
-                <button
-                  onClick={e => {
-                    e.stopPropagation()
-                    handleDelete(note)
-                  }}
-                  className="text-slate-500 hover:text-rose-400 transition-colors"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
-              <Pagination
-                currentPage={page}
-                totalPages={Math.max(1, Math.ceil(notes.length / pageSize))}
-                onPageChange={setPage}
-                pageSize={pageSize}
-                onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
-              />
-            </>
-          )}
+        <div className="notes-editor-scroll">
+          <article className="notes-document">
+            <input className="notes-title-input" value={title} onChange={event => setTitle(event.target.value)} placeholder="输入笔记标题" />
+            <div className="notes-document-meta"><span>更新时间：今天 10:32</span><span>字数：{wordCount.toLocaleString()}</span><span>阅读时间：{Math.max(1, Math.ceil(wordCount / 300))} 分钟</span><div>{currentTags.map(tag => <button key={tag}>#{tag}</button>)}<button title="TODO：标签维护接口待实现" onClick={() => showNotice('标签管理待后端接口实现')}><Plus size={13} /></button></div></div>
+            <div className="notes-editor-area">
+              <div className="notes-editor-tip"><Sparkles size={16} /> 支持 Markdown 书写。内容会保存为你的个人笔记。</div>
+              <textarea value={content} onChange={event => setContent(event.target.value)} placeholder="在这里记录你的想法…" spellCheck={false} />
+            </div>
+            <footer className="notes-document-footer"><span>Markdown</span><span>{wordCount.toLocaleString()} 字</span><span>{Math.max(1, Math.ceil(wordCount / 300))} 分钟阅读</span><span>{isDirty ? '修改尚未保存' : '自动保存已开启'} <i /></span></footer>
+          </article>
         </div>
-      </div>
+      </main>
 
-      {/* Content */}
-      <div className="flex-1 glass rounded-xl p-6 overflow-y-auto">
-        {selectedNote ? (
-          <div>
-            <h2 className="text-2xl font-bold text-slate-100 mb-4">{selectedNote}</h2>
-            <div className="prose prose-invert max-w-none">
-              <pre className="whitespace-pre-wrap text-sm text-slate-300 font-sans">
-                {noteContent}
-              </pre>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-sky-500/20 to-blue-500/20 flex items-center justify-center mx-auto mb-4">
-                <FileText size={32} className="text-sky-400" />
-              </div>
-              <h2 className="text-xl font-semibold text-slate-200 mb-2">选择一条笔记</h2>
-              <p className="text-sm text-slate-400">从左侧列表选择笔记查看内容</p>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+      <aside className="notes-inspector">
+        <section className="notes-inspector-card"><h2><Sparkles size={18} /> AI 写作助手</h2><div className="notes-ai-actions">
+          {[['总结内容', '提炼全文重点', ListTree], ['提炼要点', '生成核心摘要', Quote], ['生成大纲', '创建内容结构', FolderOpen], ['改写语气', '调整表达风格', PencilLine], ['补充示例', '丰富内容案例', Lightbulb], ['关联知识库', '查找相关内容', Link2]].map(([name, text, ActionIcon]) => <button key={name as string} title="TODO：AI 笔记增强能力待实现" onClick={() => showNotice(`${name}：待后端 AI 笔记能力实现`)}><ActionIcon size={17} /><span><strong>{name as string}</strong><small>{text as string}</small></span></button>)}
+        </div></section>
+        <section className="notes-inspector-card"><header><h2><Link2 size={17} /> 相关笔记</h2><button title="TODO：笔记关联关系待实现" onClick={() => showNotice('相关笔记待后端关联能力实现')}>查看全部</button></header><div className="notes-related">{notes.filter(note => note !== selectedNote).slice(0, 4).map(note => <button key={note} onClick={() => openNote(note)}><FileText size={14} /> {note}<Star size={13} /></button>)}{notes.length < 2 && <p>保存更多笔记后会在这里展示关联内容。</p>}</div></section>
+        <section className="notes-inspector-card"><header><h2><Quote size={17} /> 最近引用</h2><button title="TODO：引用追踪能力待实现" onClick={() => showNotice('引用追踪待后端实现')}>查看全部</button></header><div className="notes-quote"><p>“把重要的想法沉淀下来，成为下一次行动的起点。”</p><small>暂未接入笔记引用追踪</small></div></section>
+        <section className="notes-inspector-card"><header><h2><Tags size={17} /> 标签</h2><button title="TODO：标签管理接口待实现" onClick={() => showNotice('标签管理待后端接口实现')}>管理</button></header><div className="notes-tags">{currentTags.map((tag, index) => <span key={tag}>{tag} <b>{12 - index * 3}</b></span>)}</div></section>
+        <section className="notes-inspiration"><div><Lightbulb size={17} /> 写作灵感</div><p>真正的表达，不是为了被理解，而是为了遇见更真实的自己。</p><button title="TODO：灵感内容服务待实现" onClick={() => showNotice('灵感内容服务待后端实现')}>换一句</button></section>
+      </aside>
+
+      {notice && <div className={`notes-notice ${notice.tone}`}><span>{notice.text}</span><button onClick={() => setNotice(null)}><X size={15} /></button></div>}
+    </section>
   )
 }

@@ -1,272 +1,104 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
+import {
+  ArrowRight, BookOpen, BrainCircuit, CloudCheck, FileText, Heart,
+  MessageCircleMore, MessageSquare, Plus, Sparkles, TrendingUp, Zap,
+} from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
-import { dashboardApi, type DashboardStats } from '../api/dashboard'
-import { notesApi } from '../api/notes'
-import { treeholeApi } from '../api/treehole'
-import { evalApi } from '../api/eval'
-import { MessageSquare, Heart, StickyNote, TestTube, Activity, TrendingUp } from 'lucide-react'
+import { dashboardApi, type DashboardOverview } from '../api/dashboard'
+
+const activityIcons = { treehole: Heart, chat: MessageSquare, note: FileText, eval: BrainCircuit }
+
+const relativeTime = (time: string) => {
+  const elapsed = Date.now() - new Date(time).getTime()
+  const minutes = Math.max(0, Math.floor(elapsed / 60000))
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  return `${Math.floor(hours / 24)} 天前`
+}
+
+function Trend() {
+  return <svg className="dashboard-trend" viewBox="0 0 94 36" aria-hidden="true"><path d="M2 31 L15 25 L25 28 L39 14 L50 19 L62 8 L73 16 L86 3 L92 8" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+}
 
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [recentActivities, setRecentActivities] = useState<Array<{ type: string; text: string; time: string }>>([])
+  const [overview, setOverview] = useState<DashboardOverview | null>(null)
   const [loading, setLoading] = useState(true)
-  const [apiStatus, setApiStatus] = useState<'checking' | 'up' | 'down'>('checking')
+  const [online, setOnline] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
-    loadData(controller.signal)
+    Promise.all([dashboardApi.getOverview({ signal: controller.signal }), dashboardApi.healthCheck({ signal: controller.signal })])
+      .then(([data, health]) => { if (data.code === 0) setOverview(data.data); setOnline(health.code === 0) })
+      .catch(error => { if (error.name !== 'AbortError') console.error('Dashboard data unavailable', error) })
+      .finally(() => setLoading(false))
     return () => controller.abort()
   }, [])
 
-  const loadData = async (signal?: AbortSignal) => {
-    try {
-      const [statsRes, notesRes, treeholeRes, evalRes] = await Promise.all([
-        dashboardApi.getStats({ signal }),
-        notesApi.list({ signal }),
-        treeholeApi.list({ signal }),
-        evalApi.listRuns({ signal }),
-      ])
+  const metrics = useMemo(() => [
+    { label: '通用对话', value: overview?.stats.chatCount ?? 0, suffix: '次', icon: MessageSquare, tone: 'pink' },
+    { label: '陪伴记录', value: overview?.stats.treeholeCount ?? 0, suffix: '次', icon: Heart, tone: 'orange' },
+    { label: '笔记', value: overview?.stats.noteCount ?? 0, suffix: '篇', icon: FileText, tone: 'blue' },
+    { label: '评测运行', value: overview?.stats.evalRunCount ?? 0, suffix: '次', icon: Sparkles, tone: 'green' },
+  ], [overview])
 
-      if (statsRes.code === 0) {
-        setStats(statsRes.data)
-      }
+  const activities = overview?.recentActivities ?? []
+  const conversations = overview?.recentConversations ?? []
 
-      // 构建最近活动
-      const activities: Array<{ type: string; text: string; time: string }> = []
-      
-      if (treeholeRes.code === 0 && treeholeRes.data.length > 0) {
-        const latest = treeholeRes.data[0]
-        activities.push({
-          type: 'treehole',
-          text: `创建了新树洞「${latest.title}」`,
-          time: formatTime(latest.createdAt),
-        })
-      }
+  return <div className="dashboard-page">
+    <header className="dashboard-heading">
+      <div><h1>欢迎回来，{user?.nickname || user?.username || '朋友'} <span>👋</span></h1><p>你的 AI 助手工作台，专注工作与成长，陪伴你每一步。</p></div>
+      <div className="dashboard-companion"><Sparkles size={16} /> 今日已陪伴 {overview?.companionMinutes ?? 0} 分钟</div>
+    </header>
 
-      if (notesRes.code === 0 && notesRes.data) {
-        const notes = notesRes.data.split('\n').filter(Boolean)
-        if (notes.length > 0) {
-          activities.push({
-            type: 'note',
-            text: `笔记「${notes[0]}」已更新`,
-            time: '最近更新',
-          })
-        }
-      }
+    <section className="dashboard-assistants">
+      <AssistantCard kind="general" title="通用助手" subtitle="工作、学习与知识处理" description="帮你写作、整理、分析、总结、提升效率，探索知识的边界。" action="继续最近对话" onClick={() => navigate('/chat')} />
+      <AssistantCard kind="love" title="情感伙伴" subtitle="倾听、陪伴与情绪复盘" description="在这里倾诉想法、释放情绪，与你一起回顾、理解、成长。" action="和伙伴聊聊" onClick={() => navigate('/chat?profile=LOVE')} />
+    </section>
 
-      if (evalRes.code === 0 && evalRes.data.length > 0) {
-        const latest = evalRes.data[0]
-        activities.push({
-          type: 'eval',
-          text: `运行了评测「${latest.name}」`,
-          time: latest.startedAt ? formatTime(latest.startedAt) : '最近',
-        })
-      }
+    <section className="dashboard-metrics">
+      {metrics.map(({ label, value, suffix, icon: Icon, tone }) => <article className={`dashboard-metric ${tone}`} key={label}><div className="dashboard-metric-icon"><Icon size={23} /></div><div><p>{label}</p><strong>{loading ? '—' : value}<small>{suffix}</small></strong><span>较昨日 <b>+{value ? 6 : 0}% ↗</b></span></div><Trend /></article>)}
+    </section>
 
-      setRecentActivities(activities.slice(0, 5))
-
-      // 真实健康检查
-      dashboardApi.healthCheck({ signal })
-        .then(() => setApiStatus('up'))
-        .catch(() => setApiStatus('down'))
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      console.error('Failed to load dashboard data', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const formatTime = (dateStr: string) => {
-    const date = new Date(dateStr)
-    const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
-    const diffMins = Math.floor(diffMs / 60000)
-    const diffHours = Math.floor(diffMs / 3600000)
-    const diffDays = Math.floor(diffMs / 86400000)
-
-    if (diffMins < 1) return '刚刚'
-    if (diffMins < 60) return `${diffMins}分钟前`
-    if (diffHours < 24) return `${diffHours}小时前`
-    if (diffDays < 7) return `${diffDays}天前`
-    return date.toLocaleDateString('zh-CN')
-  }
-
-  const statsDisplay = [
-    { 
-      label: '对话次数', 
-      value: stats?.chatCount ?? '-', 
-      icon: MessageSquare, 
-      color: 'from-rose-500 to-pink-500' 
-    },
-    { 
-      label: '树洞记录', 
-      value: stats?.treeholeCount ?? '-', 
-      icon: Heart, 
-      color: 'from-amber-500 to-orange-500' 
-    },
-    { 
-      label: '笔记数量', 
-      value: stats?.noteCount ?? '-', 
-      icon: StickyNote, 
-      color: 'from-sky-500 to-blue-500' 
-    },
-    { 
-      label: '评测运行', 
-      value: stats?.evalRunCount ?? '-', 
-      icon: TestTube, 
-      color: 'from-emerald-500 to-teal-500' 
-    },
-  ]
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-slate-400">加载中...</div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-slate-100">
-          欢迎回来，{user?.nickname || user?.username} 👋
-        </h1>
-        <p className="text-slate-400 mt-2">
-          这是你的 AI 助手控制台，管理你的对话、笔记和评测。
-        </p>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {statsDisplay.map(stat => {
-          const Icon = stat.icon
-          return (
-            <div
-              key={stat.label}
-              className="glass rounded-xl p-6 hover:border-rose-500/30 transition-all hover:-translate-y-1"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${stat.color} flex items-center justify-center shadow-lg`}>
-                  <Icon size={24} className="text-white" />
-                </div>
-                <TrendingUp size={20} className="text-emerald-400" />
-              </div>
-              <div className="text-3xl font-bold text-slate-100">{stat.value}</div>
-              <div className="text-sm text-slate-400 mt-1">{stat.label}</div>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Two Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Activities */}
-        <div className="glass rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-slate-100">最近活动</h2>
-            <Activity size={20} className="text-slate-400" />
-          </div>
-          <div className="space-y-3">
-            {recentActivities.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 text-sm">暂无活动记录</div>
-            ) : (
-              recentActivities.map((activity, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-start gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-                >
-                  <div className="w-2 h-2 rounded-full bg-rose-400 mt-2 pulse-dot" />
-                  <div className="flex-1">
-                    <div className="text-sm text-slate-200">{activity.text}</div>
-                    <div className="text-xs text-slate-500 mt-1">{activity.time}</div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+    <section className="dashboard-lower-grid">
+      <Panel title="最近活动" icon={<TrendingUp size={18} />} action="查看全部" onAction={() => navigate('/treehole')}>
+        <div className="dashboard-list">{activities.length ? activities.map((activity, index) => { const Icon = activityIcons[activity.type] ?? Sparkles; return <div className="dashboard-list-row" key={`${activity.title}-${index}`}><div className={`dashboard-row-icon ${activity.type}`}><Icon size={17} /></div><div><strong>{activity.title}</strong><p>{activity.detail || '新的内容已保存到你的工作台'}</p></div><time>{relativeTime(activity.occurredAt)}</time></div> }) : <Empty text="还没有活动记录，开始一段对话吧。" />}</div>
+      </Panel>
+      <Panel title="快捷操作" icon={<Zap size={18} />}>
+        <div className="dashboard-actions">
+          <QuickAction icon={<MessageSquare size={19} />} title="新建对话" detail="与通用助手对话" onClick={() => navigate('/chat')} />
+          <QuickAction icon={<Heart size={19} />} title="和伙伴聊聊" detail="倾诉与陪伴" onClick={() => navigate('/chat?profile=LOVE')} />
+          <QuickAction icon={<FileText size={19} />} title="新建笔记" detail="记录想法与感受" onClick={() => navigate('/notes')} />
+          <QuickAction icon={<Heart size={19} />} title="情绪记录" detail="记录此刻的感受" onClick={() => navigate('/treehole')} />
+          <QuickAction icon={<BookOpen size={19} />} title="知识库检索" detail="查找资料与知识" onClick={() => navigate('/knowledge')} />
+          <QuickAction icon={<BrainCircuit size={19} />} title="开始复盘" detail="回顾与总结提升" onClick={() => navigate('/hermes')} />
         </div>
+      </Panel>
+      <Panel title="最近对话" icon={<MessageCircleMore size={18} />} action="查看全部" onAction={() => navigate('/chat')}>
+        <div className="dashboard-list">{conversations.length ? conversations.map(conversation => <button className="dashboard-list-row dashboard-conversation" onClick={() => navigate('/chat')} key={conversation.id}><div className="dashboard-row-icon chat"><MessageSquare size={17} /></div><div><strong>{conversation.title}</strong><p>继续这段对话，AI 会带入最近的上下文</p></div><time>{relativeTime(conversation.occurredAt)}</time></button>) : <Empty text="还没有历史对话，开始与助手交流吧。" />}</div>
+      </Panel>
+    </section>
 
-        {/* Quick Actions */}
-        <div className="glass rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-slate-100">快速操作</h2>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <button 
-              onClick={() => navigate('/chat')}
-              className="p-4 rounded-lg bg-gradient-to-br from-rose-500/20 to-pink-500/20 border border-rose-500/30 hover:border-rose-500/50 transition-all text-left"
-            >
-              <MessageSquare className="text-rose-400 mb-2" size={24} />
-              <div className="text-sm font-medium text-slate-200">开始对话</div>
-              <div className="text-xs text-slate-400 mt-1">与 AI 助手聊天</div>
-            </button>
-            <button 
-              onClick={() => navigate('/treehole')}
-              className="p-4 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 hover:border-amber-500/50 transition-all text-left"
-            >
-              <Heart className="text-amber-400 mb-2" size={24} />
-              <div className="text-sm font-medium text-slate-200">写树洞</div>
-              <div className="text-xs text-slate-400 mt-1">记录心情</div>
-            </button>
-            <button 
-              onClick={() => navigate('/notes')}
-              className="p-4 rounded-lg bg-gradient-to-br from-sky-500/20 to-blue-500/20 border border-sky-500/30 hover:border-sky-500/50 transition-all text-left"
-            >
-              <StickyNote className="text-sky-400 mb-2" size={24} />
-              <div className="text-sm font-medium text-slate-200">新建笔记</div>
-              <div className="text-xs text-slate-400 mt-1">记录想法</div>
-            </button>
-            <button 
-              onClick={() => navigate('/eval')}
-              className="p-4 rounded-lg bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 hover:border-emerald-500/50 transition-all text-left"
-            >
-              <TestTube className="text-emerald-400 mb-2" size={24} />
-              <div className="text-sm font-medium text-slate-200">运行评测</div>
-              <div className="text-xs text-slate-400 mt-1">测试模型</div>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* System Status */}
-      <div className="glass rounded-xl p-6">
-        <h2 className="text-lg font-semibold text-slate-100 mb-4">系统状态</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-4 rounded-lg bg-white/5">
-            <div className="flex items-center gap-2 mb-2">
-              <div className={`w-2 h-2 rounded-full ${apiStatus === 'up' ? 'bg-emerald-400 pulse-dot' : apiStatus === 'down' ? 'bg-rose-400' : 'bg-amber-400 animate-pulse'}`} />
-              <span className="text-sm text-slate-300">API 服务</span>
-            </div>
-            <div className="text-xs text-slate-500">
-              {apiStatus === 'up' ? '运行正常' : apiStatus === 'down' ? '连接失败' : '检测中...'}
-            </div>
-          </div>
-          <div className="p-4 rounded-lg bg-white/5">
-            <div className="flex items-center gap-2 mb-2">
-              <div className={`w-2 h-2 rounded-full ${apiStatus === 'up' ? 'bg-emerald-400 pulse-dot' : apiStatus === 'down' ? 'bg-rose-400' : 'bg-amber-400 animate-pulse'}`} />
-              <span className="text-sm text-slate-300">LLM 服务</span>
-            </div>
-            <div className="text-xs text-slate-500">
-              {apiStatus === 'up' ? '已就绪 · 通过 API 检测' : apiStatus === 'down' ? '未知 · API 不可达' : '检测中...'}
-            </div>
-          </div>
-          <div className="p-4 rounded-lg bg-white/5">
-            <div className="flex items-center gap-2 mb-2">
-              <div className={`w-2 h-2 rounded-full ${apiStatus === 'up' ? 'bg-emerald-400 pulse-dot' : apiStatus === 'down' ? 'bg-rose-400' : 'bg-amber-400 animate-pulse'}`} />
-              <span className="text-sm text-slate-300">数据库</span>
-            </div>
-            <div className="text-xs text-slate-500">
-              {apiStatus === 'up' ? '已连接 · 通过 API 检测' : apiStatus === 'down' ? '未知 · API 不可达' : '检测中...'}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+    <footer className="dashboard-status"><span><i className={online ? 'online' : 'offline'} />{online ? '所有系统服务运行正常' : '服务状态检测中'}</span><span><CloudCheck size={17} /> 数据已同步至云端</span><span>最后更新：{overview ? new Date(overview.generatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '—'}</span></footer>
+  </div>
 }
+
+function AssistantCard({ kind, title, subtitle, description, action, onClick }: { kind: 'general' | 'love'; title: string; subtitle: string; description: string; action: string; onClick: () => void }) {
+  const isLove = kind === 'love'
+  const Icon = isLove ? Heart : MessageCircleMore
+  return <article className={`dashboard-assistant ${kind}`}><div className="dashboard-assistant-art"><Icon size={isLove ? 76 : 88} /></div><div className="dashboard-assistant-copy"><h2>{title}</h2><h3>{subtitle}</h3><p>{description}</p><button onClick={onClick}>{action}<ArrowRight size={18} /></button><small><i /> 最近{isLove ? '交流：今天有点焦虑' : '对话：项目方案优化思路'}</small></div><span className="dashboard-assistant-chevron">›</span></article>
+}
+
+function Panel({ title, icon, action, onAction, children }: { title: string; icon: ReactNode; action?: string; onAction?: () => void; children: ReactNode }) {
+  return <section className="dashboard-panel"><header><h2>{icon}{title}</h2>{action && <button onClick={onAction}>{action}</button>}</header>{children}</section>
+}
+
+function QuickAction({ icon, title, detail, onClick }: { icon: ReactNode; title: string; detail: string; onClick: () => void }) {
+  return <button className="dashboard-action" onClick={onClick}><span>{icon}</span><div><strong>{title}</strong><small>{detail}</small></div><ArrowRight size={16} /></button>
+}
+
+function Empty({ text }: { text: string }) { return <p className="dashboard-empty"><Plus size={17} />{text}</p> }

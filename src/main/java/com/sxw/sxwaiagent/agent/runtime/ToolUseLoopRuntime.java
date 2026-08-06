@@ -76,9 +76,9 @@ import java.util.function.Supplier;
 public class ToolUseLoopRuntime implements AgentRuntime {
     
     private static final Logger log = LoggerFactory.getLogger(ToolUseLoopRuntime.class);
-    
-    private static final int MAX_HISTORY_MESSAGES = 100;
+
     private static final String RESILIENCE_INSTANCE = "dashscope";
+    private static final int DEFAULT_HISTORY_MESSAGES = 20;
     
     private final ChatModel chatModel;
     private final ToolExecutor toolExecutor;
@@ -145,7 +145,7 @@ public class ToolUseLoopRuntime implements AgentRuntime {
         // 历史消息（裁剪防止溢出）
         List<Message> trimmedHistory = null;
         if (context.history() != null) {
-            trimmedHistory = trimHistory(context.history(), MAX_HISTORY_MESSAGES);
+            trimmedHistory = trimHistory(context.history(), resolveMaxHistory(context));
         }
         
         // 执行 Tool-Use Loop
@@ -337,7 +337,7 @@ public class ToolUseLoopRuntime implements AgentRuntime {
         
         List<Message> trimmedHistory = null;
         if (context.history() != null) {
-            trimmedHistory = trimHistory(context.history(), MAX_HISTORY_MESSAGES);
+            trimmedHistory = trimHistory(context.history(), resolveMaxHistory(context));
         }
         
         List<AgentResponse.ToolCallInfo> toolCalls = new ArrayList<>();
@@ -876,6 +876,16 @@ public class ToolUseLoopRuntime implements AgentRuntime {
         return List.of();
     }
     
+    /**
+     * 从 Profile 的 MemoryPolicy 读取历史消息上限，未配置时使用默认值。
+     */
+    private int resolveMaxHistory(AgentContext context) {
+        if (context.profile() != null && context.profile().memoryPolicy() != null) {
+            return context.profile().memoryPolicy().maxHistoryMessages();
+        }
+        return DEFAULT_HISTORY_MESSAGES;
+    }
+
     /**
      * 裁剪历史消息，保留最近的 N 条消息，防止 context 溢出
      * <p>

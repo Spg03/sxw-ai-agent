@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * JDBC 持久化的 ChatMemoryRepository，后端为 PostgreSQL。
@@ -66,7 +67,9 @@ public class JdbcChatMemoryRepository implements ChatMemoryRepository {
                     String typeStr = rs.getString("type");
                     return deserializeMessage(typeStr, contentJson);
                 },
-                conversationId);
+                conversationId).stream()
+                .flatMap(Optional::stream)
+                .toList();
     }
 
     @Override
@@ -133,13 +136,14 @@ public class JdbcChatMemoryRepository implements ChatMemoryRepository {
 
     /**
      * 根据 type 列和 content JSON 反序列化为对应 Message 子类。
+     * 失败时返回 Optional.empty()，由调用方过滤，不注入占位消息污染上下文。
      */
-    private Message deserializeMessage(String typeStr, String contentJson) {
+    private Optional<Message> deserializeMessage(String typeStr, String contentJson) {
         try {
             MessageType type = MessageType.valueOf(typeStr);
             Map<String, Object> map = objectMapper.readValue(contentJson,
                     new TypeReference<Map<String, Object>>() {});
-            return switch (type) {
+            return Optional.of(switch (type) {
                 case USER -> new UserMessage((String) map.get("text"));
                 case SYSTEM -> new SystemMessage((String) map.get("text"));
                 case ASSISTANT -> {
@@ -157,11 +161,10 @@ public class JdbcChatMemoryRepository implements ChatMemoryRepository {
                             deserializeToolResponses(rawResponses);
                     yield new ToolResponseMessage(responses);
                 }
-            };
+            });
         } catch (Exception e) {
-            log.warn("Failed to deserialize chat memory: type={}, content={}", typeStr, contentJson, e);
-            // 降级为 UserMessage 避免中断整个对话加载
-            return new UserMessage("[deserialization error]");
+            log.warn("Failed to deserialize chat memory record (skipped): type={}", typeStr, e);
+            return Optional.empty();
         }
     }
 

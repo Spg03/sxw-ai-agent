@@ -8,6 +8,7 @@ import com.sxw.sxwaiagent.agent.profile.AgentProfileCode;
 import com.sxw.sxwaiagent.agent.runtime.AgentRuntime;
 import com.sxw.sxwaiagent.agent.runtime.LegacyReActRuntime;
 import com.sxw.sxwaiagent.agent.runtime.ToolUseLoopRuntime;
+import com.sxw.sxwaiagent.plan.AgentRunMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -118,6 +119,12 @@ public class AgentOrchestrator {
         List<Message> history = loadHistory(request.chatId(), requestId);
         
         // 5. 构建 AgentContext
+        Map<String, Object> metadata = request.metadata() == null ? Map.of() : request.metadata();
+        AgentRunMode runMode = AgentRunMode.CHAT;
+        Object modeValue = metadata.get("runMode");
+        if (modeValue != null) {
+            try { runMode = AgentRunMode.valueOf(String.valueOf(modeValue)); } catch (IllegalArgumentException ignored) { }
+        }
         AgentContext context = AgentContext.builder()
                 .requestId(requestId)
                 .traceId(traceId)
@@ -125,7 +132,9 @@ public class AgentOrchestrator {
                 .profile(profile)
                 .userMessage(request.message())
                 .history(history)
-                .metadata(request.metadata())
+                .metadata(metadata)
+                .runMode(runMode)
+                .planId((String) metadata.get("planId"))
                 .build();
         
         // 6. 执行

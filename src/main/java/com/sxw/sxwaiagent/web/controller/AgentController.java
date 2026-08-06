@@ -9,6 +9,11 @@ import com.sxw.sxwaiagent.agent.profile.AgentProfile;
 import com.sxw.sxwaiagent.agent.profile.AgentProfileCode;
 import com.sxw.sxwaiagent.agent.runtime.ToolUseLoopRuntime;
 import com.sxw.sxwaiagent.common.api.Result;
+import com.sxw.sxwaiagent.auth.AuthenticatedUser;
+import com.sxw.sxwaiagent.conversation.ConversationService;
+import com.sxw.sxwaiagent.agent.tool.ToolRegistry;
+import com.sxw.sxwaiagent.attachment.AttachmentService;
+import com.sxw.sxwaiagent.plan.AgentRunMode;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.NotBlank;
@@ -18,11 +23,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -37,25 +44,42 @@ import java.util.Map;
 @Validated
 @Slf4j
 public class AgentController {
+
+    /*
+     * Chat workspace backlog (frontend controls are displayed as disabled/TODO):
+     * TODO: add multipart attachment upload and extract file content into AgentContext.
+     * TODO: add a web-search provider abstraction with per-user authorization and audit logging.
+     * TODO: add explicit knowledge-base selection, tool selection and task-mode request fields.
+     * TODO: add pinned conversation and conversation metadata persistence scoped to the authenticated user.
+     */
     
     private final AgentOrchestrator agentOrchestrator;
     private final ToolUseLoopRuntime toolUseLoopRuntime;
     private final RequestGuard requestGuard;
     private final ChatMemory chatMemory;
     private final List<AgentProfile> agentProfiles;
+    private final ConversationService conversationService;
+    private final ToolRegistry toolRegistry;
+    private final AttachmentService attachmentService;
     
     public AgentController(
             AgentOrchestrator agentOrchestrator,
             ToolUseLoopRuntime toolUseLoopRuntime,
             RequestGuard requestGuard,
             ChatMemory agentChatMemory,
-            List<AgentProfile> agentProfiles
+            List<AgentProfile> agentProfiles,
+            ConversationService conversationService,
+            ToolRegistry toolRegistry,
+            AttachmentService attachmentService
     ) {
         this.agentOrchestrator = agentOrchestrator;
         this.toolUseLoopRuntime = toolUseLoopRuntime;
         this.requestGuard = requestGuard;
         this.chatMemory = agentChatMemory;
         this.agentProfiles = agentProfiles;
+        this.conversationService = conversationService;
+        this.toolRegistry = toolRegistry;
+        this.attachmentService = attachmentService;
     }
     
     /**
@@ -67,11 +91,12 @@ public class AgentController {
      * @return Agent 响应
      */
     @GetMapping("/chat")
-    public Result<AgentResponse> chat(
+    public Result<AgentResponse> chat(Authentication authentication,
             @NotBlank @Size(max = 2000) String message,
             @NotBlank @Size(max = 64) String chatId,
             @NotNull AgentProfileCode profile
     ) {
+        conversationService.ensure(currentUser(authentication), chatId, profile);
         AgentRequest request = AgentRequest.builder()
                 .chatId(chatId)
                 .profile(profile)
@@ -87,12 +112,23 @@ public class AgentController {
      * 统一对话入口（POST）
      */
     @PostMapping("/chat")
-    public Result<AgentResponse> chatPost(@RequestBody @Validated AgentChatBody body) {
+    public Result<AgentResponse> chatPost(Authentication authentication, @RequestBody @Validated AgentChatBody body) {
+        conversationService.ensure(currentUser(authentication), body.chatId(), body.profile());
+        conversationService.append(currentUser(authentication), body.chatId(), "USER", body.message());
+        Map<String, Object> metadata = new HashMap<>(body.metadata() == null ? Map.of() : body.metadata());
+        metadata.put("runMode", body.mode() == null ? AgentRunMode.CHAT.name() : body.mode().name());
+        metadata.put("planId", body.planId());
+        metadata.put("enabledTools", body.enabledTools() == null ? List.of() : body.enabledTools());
+        metadata.put("webSearchEnabled", Boolean.TRUE.equals(body.webSearchEnabled()));
+        metadata.put("attachmentIds", body.attachmentIds() == null ? List.of() : body.attachmentIds());
+        metadata.put("userId", currentUser(authentication));
+        metadata.put("attachmentText", attachmentService.contextText(currentUser(authentication), body.chatId(), body.attachmentIds()));
         AgentRequest request = AgentRequest.builder()
                 .chatId(body.chatId())
                 .profile(body.profile())
                 .message(body.message())
                 .stream(false)
+                .metadata(metadata)
                 .build();
         
         AgentResponse response = agentOrchestrator.handleRequest(request);
@@ -118,13 +154,16 @@ public class AgentController {
      * @return SseEmitter
      */
     @GetMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter chatStream(
+    public SseEmitter chatStream(Authentication authentication,
             @NotBlank @Size(max = 2000) @RequestParam String message,
             @NotBlank @Size(max = 64) @RequestParam String chatId,
             @NotNull @RequestParam AgentProfileCode profile
     ) {
         SseEmitter emitter = new SseEmitter(300_000L); // 5 分钟超时
         
+        long userId = currentUser(authentication);
+        conversationService.ensure(userId, chatId, profile);
+        conversationService.append(userId, chatId, "USER", message);
         String requestId = requestGuard.generateRequestId();
         String traceId = requestGuard.generateTraceId();
         
@@ -183,7 +222,8 @@ public class AgentController {
      * @param chatId 会话 ID
      */
     @DeleteMapping("/chat/{chatId}/memory")
-    public Result<Void> clearMemory(@NotBlank @PathVariable String chatId) {
+    public Result<Void> clearMemory(Authentication authentication, @NotBlank @PathVariable String chatId) {
+        conversationService.get(currentUser(authentication), chatId);
         log.info("Clearing memory for chatId={}", chatId);
         chatMemory.clear(chatId);
         return Result.ok(null);
@@ -196,6 +236,12 @@ public class AgentController {
     public Result<java.util.Set<AgentProfileCode>> profiles() {
         return Result.ok(agentOrchestrator.getRegisteredProfiles());
     }
+    @GetMapping("/tools")
+    public Result<List<Map<String, Object>>> tools(@RequestParam AgentProfileCode profile) {
+        return Result.ok(toolRegistry.getEnabledTools(profile).stream().map(tool -> Map.<String,Object>of(
+                "name", tool.name(), "description", tool.description(), "riskLevel", tool.riskLevel().name(), "requiresApproval", tool.requiresApproval())).toList());
+    }
+    private static long currentUser(Authentication authentication) { return ((AuthenticatedUser) authentication.getPrincipal()).userId(); }
     
     /**
      * 请求体
@@ -203,6 +249,16 @@ public class AgentController {
     public record AgentChatBody(
             @NotBlank @Size(max = 2000) String message,
             @NotBlank @Size(max = 64) String chatId,
-            @NotNull AgentProfileCode profile
-    ) {}
+            @NotNull AgentProfileCode profile,
+            AgentRunMode mode,
+            String planId,
+            List<String> enabledTools,
+            Boolean webSearchEnabled,
+            List<String> attachmentIds,
+            Map<String, Object> metadata
+    ) {
+        public AgentChatBody(String message, String chatId, AgentProfileCode profile) {
+            this(message, chatId, profile, AgentRunMode.CHAT, null, List.of(), false, List.of(), Map.of());
+        }
+    }
 }

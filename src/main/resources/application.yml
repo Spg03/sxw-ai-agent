@@ -82,6 +82,13 @@ sxw:
       enabled: ${SXW_SECURITY_API_KEY_ENABLED:false}
       value: ${SXW_SECURITY_API_KEY:}
   agent:
+    attachment:
+      enabled: ${AGENT_ATTACHMENT_ENABLED:true}
+      endpoint: ${MINIO_ENDPOINT:http://192.168.26.131:9000}
+      access-key: ${MINIO_ACCESS_KEY:admin}
+      secret-key: ${MINIO_SECRET_KEY:admin123456}
+      bucket: ${MINIO_BUCKET:sxw-agent-attachments}
+      max-bytes: ${AGENT_ATTACHMENT_MAX_BYTES:10485760}
     runtime:
       max-turns: ${AGENT_MAX_TURNS:10}
       llm-timeout-seconds: ${LLM_TIMEOUT_SECONDS:60}

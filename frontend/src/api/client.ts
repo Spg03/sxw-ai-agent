@@ -169,6 +169,13 @@ class ApiClient {
     }, options)
   }
 
+  async patch<T>(path: string, body?: any, options?: RequestOptions): Promise<Result<T>> {
+    return this.request<T>(path, {
+      method: 'PATCH',
+      body: body ? JSON.stringify(body) : undefined,
+    }, options)
+  }
+
   async delete<T>(path: string, options?: RequestOptions): Promise<Result<T>> {
     return this.request<T>(path, {
       method: 'DELETE',

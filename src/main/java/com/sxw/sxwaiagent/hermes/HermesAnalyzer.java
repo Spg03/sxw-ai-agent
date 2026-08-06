@@ -171,24 +171,12 @@ public class HermesAnalyzer {
 
     /**
      * 启发式分析（回退方案）
+     * <p>
+     * 仅处理非 MEMORY 类型候选。MEMORY 候选必须来自 LLM 分析或用户显式指令，
+     * 不能从 Assistant 回复关键词反推。
      */
     private void analyzeWithHeuristics(String runId, String traceId, String chatId,
                                         String assistantReply, int toolCallCount) {
-        // 记忆候选：关键词匹配
-        if (assistantReply.contains("记住") || assistantReply.contains("偏好")
-                || assistantReply.contains("喜欢") || assistantReply.contains("已记录")) {
-            try {
-                candidateService.createCandidate(
-                        runId, chatId, CandidateType.MEMORY, "用户偏好记录",
-                        assistantReply.length() > 500
-                                ? assistantReply.substring(0, 500) + "..." : assistantReply,
-                        objectMapper.writeValueAsString(Map.of("source", "heuristic", "traceId", traceId))
-                );
-            } catch (JsonProcessingException e) {
-                log.warn("Failed to serialize metadata for memory candidate in run {}", runId, e);
-            }
-        }
-
         // 知识候选：长文本 + 技术内容
         if (assistantReply.length() > 500 && containsTechnicalContent(assistantReply)) {
             try {
