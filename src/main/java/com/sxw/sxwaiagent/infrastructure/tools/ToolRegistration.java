@@ -24,6 +24,7 @@ public class ToolRegistration {
     public ToolCallback[] allTools(NoteSkill noteSkill,
                                    SkillTool skillTool,
                                    RagFlowKnowledgeService ragFlowKnowledgeService,
+                                   EnterPlanModeTool enterPlanModeTool,
                                    TerminalOperationProperties terminalProperties) {
         FileOperationTool fileOperationTool = new FileOperationTool();
         WebSearchTool webSearchTool = new WebSearchTool(searchApiKey);
@@ -42,6 +43,7 @@ public class ToolRegistration {
                 pdfGenerationTool,
                 ragFlowSearchTool,
                 terminateTool,
+                enterPlanModeTool,
                 // 笔记技能，同时通过 MCP 对外暴露
                 noteSkill,
                 // Agent Skills 入口（listSkills / loadSkill），渐进式加载领域操作手册

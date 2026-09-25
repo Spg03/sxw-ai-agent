@@ -58,6 +58,11 @@ public class EvalService {
     }
 
     public void activateCase(String caseId) {
+        EvalCase evalCase = findCase(caseId).orElseThrow(() -> new IllegalArgumentException("Eval case not found"));
+        if (evalCase.inputPrompt() == null || evalCase.inputPrompt().isBlank()) {
+            throw new IllegalArgumentException("用例输入不能为空");
+        }
+        com.sxw.sxwaiagent.agent.profile.AgentProfileCode.valueOf(evalCase.profileCode());
         evalCaseRepository.updateStatus(caseId, EvalCaseStatus.ACTIVE);
         log.info("Activated eval case: {}", caseId);
     }
@@ -91,7 +96,16 @@ public class EvalService {
     // ==================== Run Management ====================
 
     public EvalRun createRun(String runName, String profileCode, List<String> caseIds, String triggeredBy) {
-        String runId = "run-" + UUID.randomUUID().toString().substring(0, 8);
+        if (caseIds == null || caseIds.isEmpty() || caseIds.size() > 100) {
+            throw new IllegalArgumentException("每次评测需选择 1 至 100 个已启用用例");
+        }
+        caseIds = caseIds.stream().distinct().toList();
+        List<EvalCase> selected = evalCaseRepository.findByIds(caseIds);
+        if (selected.size() != caseIds.size() || selected.stream().anyMatch(c -> !c.canRun()
+                || !java.util.Objects.equals(profileCode, c.profileCode()))) {
+            throw new IllegalArgumentException("用例不存在、尚未启用或不属于所选助手");
+        }
+        String runId = "run-" + UUID.randomUUID();
         EvalRun run = new EvalRun(runId, runName, profileCode, caseIds, triggeredBy);
         evalRunRepository.save(run);
         log.info("Created eval run: {} - {}", runId, runName);
@@ -109,7 +123,7 @@ public class EvalService {
             throw new IllegalStateException("Eval run cannot start: " + run.status());
         }
 
-        evalRunRepository.updateStatus(runId, EvalRunStatus.RUNNING);
+        if (!evalRunRepository.claim(runId)) return;
 
         try {
             List<EvalCase> cases = evalCaseRepository.findByIds(run.caseIds());
@@ -129,8 +143,8 @@ public class EvalService {
             for (EvalResult r : results) {
                 if (r.passed()) passed++; else failed++;
             }
-            int skipped = cases.size() - results.size();
-            double passRate = cases.size() > 0 ? (double) passed / cases.size() * 100.0 : 0.0;
+            int skipped = run.totalCases() - results.size();
+            double passRate = (double) passed / run.totalCases() * 100.0;
 
             evalRunRepository.updateResults(runId, EvalRunStatus.COMPLETED,
                 passed, failed, skipped, passRate, durationMs);

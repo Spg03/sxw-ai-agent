@@ -13,14 +13,20 @@ import com.sxw.sxwaiagent.auth.AuthenticatedUser;
 import com.sxw.sxwaiagent.conversation.ConversationService;
 import com.sxw.sxwaiagent.agent.tool.ToolRegistry;
 import com.sxw.sxwaiagent.attachment.AttachmentService;
+import com.sxw.sxwaiagent.conversation.ConversationEventService;
+import com.sxw.sxwaiagent.conversation.ConversationContextService;
+import com.sxw.sxwaiagent.memory.AgentRunSnapshotService;
 import com.sxw.sxwaiagent.plan.AgentRunMode;
+import com.sxw.sxwaiagent.security.PromptInjectionGuard;
+import com.sxw.sxwaiagent.knowledge.KnowledgeRetrievalService;
+import com.sxw.sxwaiagent.knowledge.KnowledgeRetrievalResult;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
@@ -45,41 +51,48 @@ import java.util.Map;
 @Slf4j
 public class AgentController {
 
-    /*
-     * Chat workspace backlog (frontend controls are displayed as disabled/TODO):
-     * TODO: add multipart attachment upload and extract file content into AgentContext.
-     * TODO: add a web-search provider abstraction with per-user authorization and audit logging.
-     * TODO: add explicit knowledge-base selection, tool selection and task-mode request fields.
-     * TODO: add pinned conversation and conversation metadata persistence scoped to the authenticated user.
-     */
-    
     private final AgentOrchestrator agentOrchestrator;
     private final ToolUseLoopRuntime toolUseLoopRuntime;
     private final RequestGuard requestGuard;
-    private final ChatMemory chatMemory;
     private final List<AgentProfile> agentProfiles;
     private final ConversationService conversationService;
     private final ToolRegistry toolRegistry;
     private final AttachmentService attachmentService;
+    private final ConversationEventService conversationEvents;
+    private final PromptInjectionGuard promptInjectionGuard;
+    private final KnowledgeRetrievalService knowledgeRetrievalService;
+    private final ConversationContextService conversationContext;
+    private final AgentRunSnapshotService snapshots;
+
+    @Value("${search-api.api-key:}")
+    private String searchApiKey;
     
     public AgentController(
             AgentOrchestrator agentOrchestrator,
             ToolUseLoopRuntime toolUseLoopRuntime,
             RequestGuard requestGuard,
-            ChatMemory agentChatMemory,
             List<AgentProfile> agentProfiles,
             ConversationService conversationService,
             ToolRegistry toolRegistry,
-            AttachmentService attachmentService
+            AttachmentService attachmentService,
+            ConversationEventService conversationEvents,
+            PromptInjectionGuard promptInjectionGuard,
+            KnowledgeRetrievalService knowledgeRetrievalService,
+            ConversationContextService conversationContext,
+            AgentRunSnapshotService snapshots
     ) {
         this.agentOrchestrator = agentOrchestrator;
         this.toolUseLoopRuntime = toolUseLoopRuntime;
         this.requestGuard = requestGuard;
-        this.chatMemory = agentChatMemory;
         this.agentProfiles = agentProfiles;
         this.conversationService = conversationService;
         this.toolRegistry = toolRegistry;
         this.attachmentService = attachmentService;
+        this.conversationEvents = conversationEvents;
+        this.promptInjectionGuard = promptInjectionGuard;
+        this.knowledgeRetrievalService = knowledgeRetrievalService;
+        this.conversationContext = conversationContext;
+        this.snapshots = snapshots;
     }
     
     /**
@@ -96,12 +109,21 @@ public class AgentController {
             @NotBlank @Size(max = 64) String chatId,
             @NotNull AgentProfileCode profile
     ) {
-        conversationService.ensure(currentUser(authentication), chatId, profile);
+        long userId = currentUser(authentication);
+        conversationService.ensure(userId, chatId, profile);
+        String requestId = requestGuard.generateRequestId();
+        var safety = promptInjectionGuard.inspect(userId, chatId, requestId, message, "USER_MESSAGE");
+        if (safety.blocked()) return Result.error(422, safety.userMessage());
+        String safeMessage = safety.sanitized() ? promptInjectionGuard.sanitize(message) : message;
+        var start = conversationEvents.startTurn(userId, chatId, requestId, safeMessage, Map.of());
+        if (!start.started()) return turnConflict(start, requestId);
         AgentRequest request = AgentRequest.builder()
                 .chatId(chatId)
                 .profile(profile)
-                .message(message)
+                .message(safeMessage)
                 .stream(false)
+                .metadata(Map.of("userId", userId, "requestId", requestId,
+                        "memoryReadEnabled", true, "memoryWriteEnabled", true, "promptSafety", safety))
                 .build();
         
         AgentResponse response = agentOrchestrator.handleRequest(request);
@@ -114,19 +136,34 @@ public class AgentController {
     @PostMapping("/chat")
     public Result<AgentResponse> chatPost(Authentication authentication, @RequestBody @Validated AgentChatBody body) {
         conversationService.ensure(currentUser(authentication), body.chatId(), body.profile());
-        conversationService.append(currentUser(authentication), body.chatId(), "USER", body.message());
+        String requestId = body.requestId() == null || body.requestId().isBlank() ? requestGuard.generateRequestId() : body.requestId();
+        var safety = promptInjectionGuard.inspect(currentUser(authentication), body.chatId(), requestId, body.message(), "USER_MESSAGE");
+        if (safety.blocked()) return Result.error(422, safety.userMessage());
+        String safeMessage = safety.sanitized() ? promptInjectionGuard.sanitize(body.message()) : body.message();
+        String attachmentText = attachmentService.contextText(currentUser(authentication), body.chatId(), body.attachmentIds());
+        KnowledgeRetrievalResult knowledgeResult = knowledge(body.chatId(), currentUser(authentication),
+                body.knowledgeDocumentIds(), safeMessage);
+        var start = conversationEvents.startTurn(currentUser(authentication), body.chatId(), requestId,
+                safeMessage, Map.of("profile", body.profile().name()));
+        if (!start.started()) return turnConflict(start, requestId);
         Map<String, Object> metadata = new HashMap<>(body.metadata() == null ? Map.of() : body.metadata());
+        metadata.put("requestId", requestId);
         metadata.put("runMode", body.mode() == null ? AgentRunMode.CHAT.name() : body.mode().name());
         metadata.put("planId", body.planId());
         metadata.put("enabledTools", body.enabledTools() == null ? List.of() : body.enabledTools());
         metadata.put("webSearchEnabled", Boolean.TRUE.equals(body.webSearchEnabled()));
         metadata.put("attachmentIds", body.attachmentIds() == null ? List.of() : body.attachmentIds());
+        metadata.put("knowledgeDocumentIds", body.knowledgeDocumentIds() == null ? List.of() : body.knowledgeDocumentIds());
         metadata.put("userId", currentUser(authentication));
-        metadata.put("attachmentText", attachmentService.contextText(currentUser(authentication), body.chatId(), body.attachmentIds()));
+        metadata.put("attachmentText", attachmentText);
+        metadata.put("memoryReadEnabled", !Boolean.FALSE.equals(body.memoryReadEnabled()));
+        metadata.put("memoryWriteEnabled", !Boolean.FALSE.equals(body.memoryWriteEnabled()));
+        metadata.put("promptSafety", safety);
+        metadata.put("knowledgeResult", knowledgeResult);
         AgentRequest request = AgentRequest.builder()
                 .chatId(body.chatId())
                 .profile(body.profile())
-                .message(body.message())
+                .message(safeMessage)
                 .stream(false)
                 .metadata(metadata)
                 .build();
@@ -157,15 +194,33 @@ public class AgentController {
     public SseEmitter chatStream(Authentication authentication,
             @NotBlank @Size(max = 2000) @RequestParam String message,
             @NotBlank @Size(max = 64) @RequestParam String chatId,
-            @NotNull @RequestParam AgentProfileCode profile
+            @NotNull @RequestParam AgentProfileCode profile,
+            @RequestParam(defaultValue = "true") boolean memoryReadEnabled,
+            @RequestParam(defaultValue = "true") boolean memoryWriteEnabled,
+            @RequestParam(defaultValue = "CHAT") AgentRunMode mode,
+            @RequestParam(required = false) String planId,
+            @RequestParam(required = false) List<String> attachmentIds
     ) {
         SseEmitter emitter = new SseEmitter(300_000L); // 5 分钟超时
         
         long userId = currentUser(authentication);
-        conversationService.ensure(userId, chatId, profile);
-        conversationService.append(userId, chatId, "USER", message);
         String requestId = requestGuard.generateRequestId();
         String traceId = requestGuard.generateTraceId();
+        conversationService.ensure(userId, chatId, profile);
+        var safety = promptInjectionGuard.inspect(userId, chatId, requestId, message, "USER_MESSAGE");
+        if (safety.blocked()) {
+            try { emitter.send(SseEmitter.event().name("security").data(safety.publicView())); emitter.send(SseEmitter.event().name("error").data(Map.of("type", "error", "message", safety.userMessage()))); emitter.complete(); }
+            catch (Exception e) { emitter.completeWithError(e); }
+            return emitter;
+        }
+        String safeMessage = safety.sanitized() ? promptInjectionGuard.sanitize(message) : message;
+        String attachmentText = attachmentService.contextText(userId, chatId, attachmentIds);
+        var start = conversationEvents.startTurn(userId, chatId, requestId, safeMessage,
+                Map.of("profile", profile.name(), "legacyStream", true));
+        if (!start.started()) {
+            streamConflict(emitter, start, requestId);
+            return emitter;
+        }
         
         log.info("[{}] SSE stream request: profile={}, chatId={}", requestId, profile, chatId);
         
@@ -186,13 +241,32 @@ public class AgentController {
             return emitter;
         }
         
-        // 加载历史消息
+        // 从 PostgreSQL 事件流加载摘要、工作记忆和完整 Turn。
         List<Message> history = List.of();
+        Map<String, Object> metadata = new HashMap<>();
         try {
-            history = chatMemory.get(chatId);
+            var slice = conversationContext.prepare(userId, chatId, requestId, safeMessage);
+            history = slice.messages();
+            slice.contributeTo(metadata);
         } catch (Exception e) {
-            log.warn("[{}] Failed to load history for chatId={}: {}", requestId, chatId, e.getMessage());
+            log.error("[{}] Failed to load history for chatId={}: {}", requestId, chatId, e.getMessage());
+            conversationEvents.failTurn(chatId, requestId, "FAILED", "CONTEXT_LOAD_FAILED");
+            try {
+                emitter.send(SseEmitter.event().name("error").data(Map.of(
+                        "type", "error", "message", "无法构建对话上下文，请稍后重试")));
+                emitter.complete();
+            } catch (Exception sendError) {
+                emitter.completeWithError(sendError);
+            }
+            return emitter;
         }
+        metadata.put("requestId", requestId);
+        metadata.put("userId", userId);
+        metadata.put("memoryReadEnabled", memoryReadEnabled);
+        metadata.put("memoryWriteEnabled", memoryWriteEnabled);
+        metadata.put("promptSafety", safety);
+        metadata.put("attachmentText", attachmentText);
+        snapshots.begin(chatId, userId, requestId, traceId);
         
         // 构建上下文
         AgentContext context = AgentContext.builder()
@@ -200,8 +274,11 @@ public class AgentController {
                 .traceId(traceId)
                 .chatId(chatId)
                 .profile(agentProfile)
-                .userMessage(message)
+                .userMessage(safeMessage)
                 .history(history)
+                .metadata(metadata)
+                .runMode(mode)
+                .planId(planId)
                 .build();
         
         // 异步执行流式 Tool-Use Loop
@@ -209,10 +286,74 @@ public class AgentController {
         
         emitter.onTimeout(() -> {
             log.warn("[{}] SSE connection timeout", requestId);
+            conversationEvents.failTurn(chatId, requestId, "CANCELLED", "SSE_TIMEOUT");
+            snapshots.completeByRequest(requestId, "FAILED", "SSE_TIMEOUT");
             emitter.complete();
         });
         emitter.onCompletion(() -> log.info("[{}] SSE connection completed", requestId));
         
+        return emitter;
+    }
+
+    /** Preferred streaming endpoint: token travels in Authorization header, never in the URL. */
+    @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter chatStreamPost(Authentication authentication, @RequestBody @Validated AgentChatBody body) {
+        SseEmitter emitter = new SseEmitter(300_000L);
+        long userId = currentUser(authentication);
+        String requestId = body.requestId() == null || body.requestId().isBlank() ? requestGuard.generateRequestId() : body.requestId();
+        String traceId = requestGuard.generateTraceId();
+        conversationService.ensure(userId, body.chatId(), body.profile());
+        var safety = promptInjectionGuard.inspect(userId, body.chatId(), requestId, body.message(), "USER_MESSAGE");
+        if (safety.blocked()) {
+            try { emitter.send(SseEmitter.event().name("security").data(safety.publicView())); emitter.send(SseEmitter.event().name("error").data(Map.of("type", "error", "message", safety.userMessage()))); emitter.complete(); }
+            catch (Exception e) { emitter.completeWithError(e); }
+            return emitter;
+        }
+        String safeMessage = safety.sanitized() ? promptInjectionGuard.sanitize(body.message()) : body.message();
+        String attachmentText = attachmentService.contextText(userId, body.chatId(), body.attachmentIds());
+        KnowledgeRetrievalResult knowledgeResult = knowledge(body.chatId(), userId,
+                body.knowledgeDocumentIds(), safeMessage);
+        var start = conversationEvents.startTurn(userId, body.chatId(), requestId, safeMessage,
+                Map.of("profile", body.profile().name()));
+        if (!start.started()) {
+            streamConflict(emitter, start, requestId);
+            return emitter;
+        }
+        AgentProfile profile = agentProfiles.stream().filter(p -> p.code() == body.profile()).findFirst().orElseThrow(() -> new IllegalArgumentException("Unknown profile"));
+        ConversationContextService.ContextSlice slice;
+        try {
+            slice = conversationContext.prepare(userId, body.chatId(), requestId, safeMessage);
+        } catch (Exception e) {
+            conversationEvents.failTurn(body.chatId(), requestId, "FAILED", "CONTEXT_LOAD_FAILED");
+            try {
+                emitter.send(SseEmitter.event().name("error").data(Map.of(
+                        "type", "error", "message", "无法构建对话上下文，请稍后重试")));
+                emitter.complete();
+            } catch (Exception sendError) {
+                emitter.completeWithError(sendError);
+            }
+            return emitter;
+        }
+        List<Message> history = slice.messages();
+        Map<String, Object> metadata = new HashMap<>(body.metadata() == null ? Map.of() : body.metadata());
+        slice.contributeTo(metadata);
+        metadata.put("requestId", requestId);
+        metadata.put("userId", userId);
+        metadata.put("enabledTools", body.enabledTools() == null ? List.of() : body.enabledTools());
+        metadata.put("webSearchEnabled", Boolean.TRUE.equals(body.webSearchEnabled()));
+        metadata.put("knowledgeDocumentIds", body.knowledgeDocumentIds() == null ? List.of() : body.knowledgeDocumentIds());
+        metadata.put("knowledgeResult", knowledgeResult);
+        metadata.put("attachmentText", attachmentText);
+        metadata.put("memoryReadEnabled", !Boolean.FALSE.equals(body.memoryReadEnabled()));
+        metadata.put("memoryWriteEnabled", !Boolean.FALSE.equals(body.memoryWriteEnabled()));
+        metadata.put("promptSafety", safety);
+        snapshots.begin(body.chatId(), userId, requestId, traceId);
+        toolUseLoopRuntime.executeStream(AgentContext.builder().requestId(requestId).traceId(traceId).chatId(body.chatId()).profile(profile).userMessage(safeMessage).history(history).metadata(metadata).runMode(body.mode() == null ? AgentRunMode.CHAT : body.mode()).planId(body.planId()).build(), emitter);
+        emitter.onTimeout(() -> {
+            conversationEvents.failTurn(body.chatId(), requestId, "CANCELLED", "SSE_TIMEOUT");
+            snapshots.completeByRequest(requestId, "FAILED", "SSE_TIMEOUT");
+            emitter.complete();
+        });
         return emitter;
     }
     
@@ -223,9 +364,8 @@ public class AgentController {
      */
     @DeleteMapping("/chat/{chatId}/memory")
     public Result<Void> clearMemory(Authentication authentication, @NotBlank @PathVariable String chatId) {
-        conversationService.get(currentUser(authentication), chatId);
         log.info("Clearing memory for chatId={}", chatId);
-        chatMemory.clear(chatId);
+        conversationService.clearMessages(currentUser(authentication), chatId);
         return Result.ok(null);
     }
 
@@ -239,7 +379,42 @@ public class AgentController {
     @GetMapping("/tools")
     public Result<List<Map<String, Object>>> tools(@RequestParam AgentProfileCode profile) {
         return Result.ok(toolRegistry.getEnabledTools(profile).stream().map(tool -> Map.<String,Object>of(
-                "name", tool.name(), "description", tool.description(), "riskLevel", tool.riskLevel().name(), "requiresApproval", tool.requiresApproval())).toList());
+                "name", tool.name(), "description", tool.description(), "riskLevel", tool.riskLevel().name(), "requiresApproval", tool.requiresApproval(),
+                "networkRequired", tool.name().equals("searchWeb") || tool.name().equals("scrapeWebPage"),
+                "available", !(tool.name().equals("searchWeb") || tool.name().equals("scrapeWebPage")) || !searchApiKey.isBlank())).toList());
+    }
+    private KnowledgeRetrievalResult knowledge(String chatId, long userId, List<String> documentIds, String query) {
+        if (documentIds == null || documentIds.isEmpty()) return KnowledgeRetrievalResult.empty(query);
+        // Repository query rechecks owner/document ids; no user-provided context is trusted.
+        return knowledgeRetrievalService.retrieveForUser(userId, documentIds, query, 5, .35);
+    }
+    private Result<AgentResponse> turnConflict(ConversationEventService.TurnStartResult start, String requestId) {
+        if (start.duplicateCompleted()) {
+            return Result.ok(AgentResponse.builder().requestId(requestId).traceId("")
+                    .answer(start.existingAnswer()).citations(List.of()).toolCalls(List.of()).latencyMs(0).build());
+        }
+        String message = start.status() == ConversationEventService.TurnStartStatus.BUSY
+                ? "当前会话已有任务正在执行，请等待完成后重试"
+                : "该请求正在处理中，请使用相同 requestId 查询结果";
+        return Result.error(409, message);
+    }
+    private void streamConflict(SseEmitter emitter, ConversationEventService.TurnStartResult start,
+                                String requestId) {
+        try {
+            if (start.duplicateCompleted()) {
+                emitter.send(SseEmitter.event().name("done").data(Map.of(
+                        "type", "done", "requestId", requestId, "traceId", "",
+                        "answer", start.existingAnswer(), "latencyMs", 0)));
+            } else {
+                String message = start.status() == ConversationEventService.TurnStartStatus.BUSY
+                        ? "当前会话已有任务正在执行，请等待完成后重试"
+                        : "该请求正在处理中，请稍后查询结果";
+                emitter.send(SseEmitter.event().name("error").data(Map.of("type", "error", "message", message)));
+            }
+            emitter.complete();
+        } catch (Exception e) {
+            emitter.completeWithError(e);
+        }
     }
     private static long currentUser(Authentication authentication) { return ((AuthenticatedUser) authentication.getPrincipal()).userId(); }
     
@@ -254,11 +429,15 @@ public class AgentController {
             String planId,
             List<String> enabledTools,
             Boolean webSearchEnabled,
+            List<String> knowledgeDocumentIds,
             List<String> attachmentIds,
-            Map<String, Object> metadata
+            Map<String, Object> metadata,
+            String requestId,
+            Boolean memoryReadEnabled,
+            Boolean memoryWriteEnabled
     ) {
         public AgentChatBody(String message, String chatId, AgentProfileCode profile) {
-            this(message, chatId, profile, AgentRunMode.CHAT, null, List.of(), false, List.of(), Map.of());
+            this(message, chatId, profile, AgentRunMode.CHAT, null, List.of(), false, List.of(), List.of(), Map.of(), null, true, true);
         }
     }
 }

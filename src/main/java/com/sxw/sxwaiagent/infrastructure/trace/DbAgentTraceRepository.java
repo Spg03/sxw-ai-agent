@@ -137,6 +137,28 @@ public class DbAgentTraceRepository {
                 limit);
     }
 
+    /** Ownership is enforced in SQL before pagination; orphaned legacy traces are admin-only. */
+    public List<AgentTraceRun> findForUser(long userId, String chatId, String traceId, int limit) {
+        String sql = """
+            SELECT t.request_id, t.chat_id, t.status, t.started_at, t.finished_at, t.events_json
+            FROM ai_request_trace t
+            JOIN ai_conversation c ON c.conversation_id = t.chat_id
+            WHERE c.user_id = ?
+            """;
+        java.util.List<Object> args = new java.util.ArrayList<>();
+        args.add(userId);
+        if (chatId != null) { sql += " AND t.chat_id = ?"; args.add(chatId); }
+        if (traceId != null) { sql += " AND t.request_id = ?"; args.add(traceId); }
+        sql += " ORDER BY t.started_at DESC LIMIT ?";
+        args.add(Math.max(1, Math.min(limit, 100)));
+        return jdbcTemplate.query(sql, (rs, n) -> {
+            Timestamp finished = rs.getTimestamp("finished_at");
+            return new AgentTraceRun(rs.getString("request_id"), rs.getString("chat_id"),
+                    rs.getTimestamp("started_at").toInstant(), finished == null ? null : finished.toInstant(),
+                    rs.getString("status"), deserializeEvents(rs.getString("events_json")));
+        }, args.toArray());
+    }
+
     public void deleteByTraceId(String traceId) {
         jdbcTemplate.update("DELETE FROM ai_request_trace WHERE request_id = ?", traceId);
     }

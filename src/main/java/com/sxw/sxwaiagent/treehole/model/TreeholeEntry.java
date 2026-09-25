@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
@@ -36,8 +37,20 @@ public class TreeholeEntry {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String hermesReply;
 
+    @Column(nullable = false, length = 32)
+    private String mood;
+
+    @Column(nullable = false)
+    private boolean favorite;
+
+    @Column(nullable = false)
+    private boolean archived;
+
     @Column(nullable = false)
     private Instant createdAt;
+
+    @Column(nullable = false)
+    private Instant updatedAt;
 
     protected TreeholeEntry() {
     }
@@ -47,7 +60,8 @@ public class TreeholeEntry {
                                        String content,
                                        String emotionTag,
                                        String hermesSummary,
-                                       String hermesReply) {
+                                       String hermesReply,
+                                       String mood) {
         TreeholeEntry entry = new TreeholeEntry();
         entry.userId = userId;
         entry.title = title;
@@ -55,13 +69,31 @@ public class TreeholeEntry {
         entry.emotionTag = emotionTag;
         entry.hermesSummary = hermesSummary;
         entry.hermesReply = hermesReply;
+        entry.mood = mood;
         return entry;
+    }
+
+    public static TreeholeEntry create(Long userId,
+                                       String title,
+                                       String content,
+                                       String emotionTag,
+                                       String hermesSummary,
+                                       String hermesReply) {
+        return create(userId, title, content, emotionTag, hermesSummary, hermesReply, "平静");
     }
 
     @PrePersist
     void prePersist() {
-        this.createdAt = Instant.now();
+        Instant now = Instant.now();
+        this.createdAt = now;
+        this.updatedAt = now;
     }
+
+    @PreUpdate
+    void preUpdate() { this.updatedAt = Instant.now(); }
+
+    public void setArchived(boolean archived) { this.archived = archived; }
+    public void setFavorite(boolean favorite) { this.favorite = favorite; }
 
     public Long getId() {
         return id;
@@ -98,4 +130,9 @@ public class TreeholeEntry {
     public Instant getCreatedAt() {
         return createdAt;
     }
+
+    public String getMood() { return mood; }
+    public boolean isFavorite() { return favorite; }
+    public boolean isArchived() { return archived; }
+    public Instant getUpdatedAt() { return updatedAt; }
 }

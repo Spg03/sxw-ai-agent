@@ -1,223 +1,109 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Brain, Check, X, RotateCw, Sparkles, BookOpen, TestTube, ShieldCheck, AlertTriangle, Search } from 'lucide-react'
 import { hermesApi, type HermesCandidate } from '../api/hermes'
 import { useAuth } from '../contexts/AuthContext'
-import { Brain, Check, X, RotateCw, Sparkles, BookOpen, TestTube, ShieldAlert, AlertTriangle } from 'lucide-react'
-import Pagination from '../components/Pagination'
+import { ConsoleHeader, ConsoleDialog, ConsoleNotice, ConsolePager, EmptyState, StatusBadge } from '../components/ConsoleUI'
+import { formatDate, resultData, errorMessage } from '../utils/console'
 
-const TYPE_META: Record<string, { icon: typeof Sparkles; color: string; label: string }> = {
-  MEMORY: { icon: Brain, color: 'from-purple-500 to-indigo-500', label: '记忆' },
-  KNOWLEDGE: { icon: BookOpen, color: 'from-sky-500 to-blue-500', label: '知识' },
-  EVAL_CASE: { icon: TestTube, color: 'from-emerald-500 to-teal-500', label: '评测用例' },
-  AGENT_RULE: { icon: ShieldAlert, color: 'from-amber-500 to-orange-500', label: 'Agent 规则' },
-  PROMPT_IMPROVEMENT: { icon: Sparkles, color: 'from-rose-500 to-pink-500', label: 'Prompt 改进' },
-  TOOL_IMPROVEMENT: { icon: Sparkles, color: 'from-teal-500 to-cyan-500', label: '工具改进' },
+const TYPES = {
+  MEMORY: { icon: Brain, label: '记忆', tone: '' }, KNOWLEDGE: { icon: BookOpen, label: '知识', tone: 'knowledge' },
+  EVAL_CASE: { icon: TestTube, label: '评测用例', tone: 'eval' }, AGENT_RULE: { icon: ShieldCheck, label: 'Agent 规则', tone: 'rule' },
+  PROMPT_IMPROVEMENT: { icon: Sparkles, label: 'Prompt 改进', tone: '' }, TOOL_IMPROVEMENT: { icon: Sparkles, label: '工具改进', tone: 'knowledge' },
 }
-
-const STATUS_STYLES: Record<string, string> = {
-  PENDING: 'bg-amber-500/20 text-amber-300',
-  APPROVED: 'bg-sky-500/20 text-sky-300',
-  REJECTED: 'bg-rose-500/20 text-rose-300',
-  APPLIED: 'bg-emerald-500/20 text-emerald-300',
-  APPLY_FAILED: 'bg-rose-500/20 text-rose-300',
-}
-
-type Tab = 'pending' | 'failed'
+type Action = 'approve' | 'reject' | 'retry'
+const ACTION_LABELS = { approve: '批准', reject: '拒绝', retry: '重试应用' }
 
 export default function Hermes() {
   const { user } = useAuth()
-  const [tab, setTab] = useState<Tab>('pending')
-  const [candidates, setCandidates] = useState<HermesCandidate[]>([])
+  const [tab, setTab] = useState<'pending' | 'failed'>('pending')
+  const [data, setData] = useState<{ pending: HermesCandidate[]; failed: HermesCandidate[] }>({ pending: [], failed: [] })
   const [loading, setLoading] = useState(true)
+  const [reload, setReload] = useState(0)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [query, setQuery] = useState('')
+  const [type, setType] = useState('ALL')
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
-  const [actingId, setActingId] = useState<string | null>(null)
+  const [size, setSize] = useState(10)
+  const [expanded, setExpanded] = useState<string[]>([])
+  const [confirmation, setConfirmation] = useState<{ candidate: HermesCandidate; action: Action } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
 
+  const canReview = user?.role === 'ADMIN'
   useEffect(() => {
+    if (!canReview) { setLoading(false); return }
     const controller = new AbortController()
-    loadCandidates(controller.signal)
+    setLoading(true); setError('')
+    Promise.all([hermesApi.listPending({ signal: controller.signal }), hermesApi.listFailed({ signal: controller.signal })])
+      .then(([pending, failed]) => { if (!controller.signal.aborted) setData({ pending: resultData(pending) ?? [], failed: resultData(failed) ?? [] }) })
+      .catch(err => { if (!controller.signal.aborted) setError(errorMessage(err)) })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
-  }, [tab])
+  }, [reload, canReview])
 
-  const loadCandidates = async (signal?: AbortSignal) => {
-    setLoading(true)
+  const filtered = data[tab].filter(c => (type === 'ALL' || c.type === type) && [c.title, c.content, c.sourceTraceId].join(' ').toLowerCase().includes(query.trim().toLowerCase()))
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(filtered.length / size)))
+  const ask = (candidate: HermesCandidate, action: Action) => { setActionError(''); setConfirmation({ candidate, action }) }
+  const act = async () => {
+    if (!confirmation || busy) return
+    if (!user?.username) { setActionError('无法获取审核人信息，请重新登录'); return }
+    setBusy(true); setActionError('')
     try {
-      const res = tab === 'pending'
-        ? await hermesApi.listPending({ signal })
-        : await hermesApi.listFailed({ signal })
-      if (res.code === 0) {
-        setCandidates(res.data ?? [])
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      console.error('Failed to load candidates', err)
-    } finally {
-      setLoading(false)
-    }
+      resultData(await hermesApi[confirmation.action](confirmation.candidate.candidateId))
+      setNotice(confirmation.action === 'approve' ? '已提交批准，将按审核流程应用；如应用失败，可在“应用失败”中查看。' : '已' + ACTION_LABELS[confirmation.action] + '「' + confirmation.candidate.title + '」')
+      setConfirmation(null); setReload(n => n + 1)
+    } catch (err) { setActionError(errorMessage(err)) } finally { setBusy(false) }
   }
 
-  const handleApprove = async (candidateId: string) => {
-    setActingId(candidateId)
-    try {
-      const res = await hermesApi.approve(candidateId, user?.username || 'admin')
-      if (res.code === 0) {
-        // 操作成功后从列表移除（已不再是 PENDING）
-        setCandidates(prev => prev.filter(c => c.candidateId !== candidateId))
-      }
-    } catch (err) {
-      console.error('Failed to approve', err)
-    } finally {
-      setActingId(null)
-    }
-  }
+  if (!canReview) return <div className="console-page"><EmptyState icon={ShieldCheck} title="需要管理员审核权限" description="这里的候选会影响共享记忆、知识与规则，请联系管理员审核。个人记忆可在对话的记忆管理中维护。" /></div>
 
-  const handleReject = async (candidateId: string) => {
-    setActingId(candidateId)
-    try {
-      const res = await hermesApi.reject(candidateId, user?.username || 'admin')
-      if (res.code === 0) {
-        setCandidates(prev => prev.filter(c => c.candidateId !== candidateId))
-      }
-    } catch (err) {
-      console.error('Failed to reject', err)
-    } finally {
-      setActingId(null)
-    }
-  }
-
-  const handleRetry = async (candidateId: string) => {
-    setActingId(candidateId)
-    try {
-      const res = await hermesApi.retry(candidateId, user?.username || 'admin')
-      if (res.code === 0) {
-        setCandidates(prev => prev.filter(c => c.candidateId !== candidateId))
-      }
-    } catch (err) {
-      console.error('Failed to retry', err)
-    } finally {
-      setActingId(null)
-    }
-  }
-
-  const paged = candidates.slice((page - 1) * pageSize, page * pageSize)
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-100">Hermes 复盘</h1>
-          <p className="text-slate-400 mt-2">审核 Agent 自动生成的改进候选（记忆 / 知识 / 评测 / 规则）</p>
-        </div>
-        <div className="flex items-center gap-1 p-1 rounded-lg bg-white/5">
-          <button
-            onClick={() => { setTab('pending'); setPage(1) }}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              tab === 'pending' ? 'bg-amber-500/20 text-amber-300' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            待审核
-          </button>
-          <button
-            onClick={() => { setTab('failed'); setPage(1) }}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              tab === 'failed' ? 'bg-rose-500/20 text-rose-300' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            应用失败
-          </button>
-        </div>
-      </div>
-
-      {/* Candidates */}
-      {loading ? (
-        <div className="text-center py-12 text-slate-400">加载中...</div>
-      ) : paged.length === 0 ? (
-        <div className="text-center py-12">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-purple-500/20 to-indigo-500/20 flex items-center justify-center mx-auto mb-4">
-            {tab === 'pending' ? <Brain size={32} className="text-purple-400" /> : <AlertTriangle size={32} className="text-rose-400" />}
-          </div>
-          <h2 className="text-xl font-semibold text-slate-200 mb-2">
-            {tab === 'pending' ? '暂无待审核候选' : '暂无失败候选'}
-          </h2>
-          <p className="text-sm text-slate-400">
-            {tab === 'pending' ? 'Agent 运行后会自动生成改进候选' : '没有应用失败的候选记录'}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {paged.map(c => {
-            const meta = TYPE_META[c.type] || TYPE_META.MEMORY
-            const TypeIcon = meta.icon
-            return (
-              <div key={c.candidateId} className="glass rounded-xl p-6 hover:border-purple-500/30 transition-all">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${meta.color} flex items-center justify-center flex-shrink-0`}>
-                      <TypeIcon size={18} className="text-white" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-semibold text-slate-200">{c.title}</h3>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-xs text-purple-300">{meta.label}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_STYLES[c.status] || STATUS_STYLES.PENDING}`}>{c.status}</span>
-                        <span className="text-xs text-slate-500">置信度 {(c.confidence * 100).toFixed(0)}%</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {tab === 'pending' && (
-                      <>
-                        <button
-                          onClick={() => handleApprove(c.candidateId)}
-                          disabled={actingId === c.candidateId}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-colors disabled:opacity-50"
-                        >
-                          <Check size={14} /> 批准
-                        </button>
-                        <button
-                          onClick={() => handleReject(c.candidateId)}
-                          disabled={actingId === c.candidateId}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 transition-colors disabled:opacity-50"
-                        >
-                          <X size={14} /> 拒绝
-                        </button>
-                      </>
-                    )}
-                    {tab === 'failed' && (
-                      <button
-                        onClick={() => handleRetry(c.candidateId)}
-                        disabled={actingId === c.candidateId}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-colors disabled:opacity-50"
-                      >
-                        <RotateCw size={14} /> 重试
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <pre className="p-4 rounded-lg bg-black/30 border border-white/10 text-xs text-slate-300 overflow-x-auto whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">
-                  {c.content}
-                </pre>
-
-                <div className="flex items-center gap-4 mt-3 text-xs text-slate-500">
-                  {c.sourceTraceId && <span>Trace: {c.sourceTraceId.slice(-8)}</span>}
-                  <span>会话: {c.chatId?.slice(-8)}</span>
-                  <span>创建: {new Date(c.createdAt).toLocaleString('zh-CN')}</span>
-                  {c.reviewedBy && <span>审核人: {c.reviewedBy}</span>}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      <Pagination
-        currentPage={page}
-        totalPages={Math.max(1, Math.ceil(candidates.length / pageSize))}
-        onPageChange={setPage}
-        pageSize={pageSize}
-        onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
-      />
+  return <div className="console-page">
+    <ConsoleHeader icon={Sparkles} eyebrow="HERMES · REVIEW" title="Hermes 复盘" description="把执行经验转化为改进，让每一次学习都经过你的审核。">
+      <button className="console-button" disabled={loading} onClick={() => setReload(n => n + 1)}><RotateCw size={16} className={loading ? 'console-spin' : ''} />刷新候选</button>
+    </ConsoleHeader>
+    <div className="console-stats">
+      <div className="console-stat"><ShieldCheck /><div><strong>{loading ? '—' : data.pending.length}</strong><span>等待你的审核</span></div></div>
+      <div className="console-stat"><AlertTriangle /><div><strong>{loading ? '—' : data.failed.length}</strong><span>失败或中断 · 可重试</span></div></div>
+      <div className="console-stat"><Brain /><div><strong>{loading ? '—' : new Set([...data.pending, ...data.failed].map(c => c.type)).size}</strong><span>当前候选类型</span></div></div>
     </div>
-  )
+    <ConsoleNotice message={error} error /><ConsoleNotice message={notice} />
+    <section className="console-panel" aria-label="改进候选">
+      <div className="console-panel-header"><div><h2><Sparkles size={19} />改进候选</h2><p>先核对内容与来源，再决定是否沉淀到系统。</p></div></div>
+      <div className="console-toolbar">
+        <div className="console-tabs" aria-label="候选状态">
+          <button aria-pressed={tab === 'pending'} onClick={() => { setTab('pending'); setPage(1) }}>待审核 <span>{data.pending.length}</span></button>
+          <button aria-pressed={tab === 'failed'} onClick={() => { setTab('failed'); setPage(1) }}>应用失败 <span>{data.failed.length}</span></button>
+        </div>
+        <label className="console-search"><Search size={17} /><input aria-label="搜索候选" placeholder="搜索标题、内容或 Trace ID" value={query} onChange={e => { setQuery(e.target.value); setPage(1) }} /></label>
+        <select className="console-select" aria-label="候选类型" value={type} onChange={e => { setType(e.target.value); setPage(1) }}><option value="ALL">全部类型</option>{Object.entries(TYPES).map(([key, value]) => <option key={key} value={key}>{value.label}</option>)}</select>
+      </div>
+      {loading ? <EmptyState icon={Sparkles} title="正在加载候选…" loading /> : error ? <EmptyState icon={AlertTriangle} title="候选加载失败" description="请检查服务状态，然后重新加载。"><button className="console-button" onClick={() => setReload(n => n + 1)}>重新加载</button></EmptyState>
+        : !filtered.length ? <EmptyState icon={tab === 'failed' ? ShieldCheck : Sparkles} title={query || type !== 'ALL' ? '没有匹配的候选' : tab === 'failed' ? '暂无应用失败的候选' : '当前没有待审核候选'} description={query || type !== 'ALL' ? '换个关键词或清除筛选，查看其他候选。' : 'Hermes 会从执行记录中提炼经验，新的改进候选将在这里等待审核。'}>
+          {(query || type !== 'ALL') && <button className="console-button" onClick={() => { setQuery(''); setType('ALL'); setPage(1) }}>清除筛选</button>}
+        </EmptyState> : <div className="console-list">{filtered.slice((currentPage - 1) * size, currentPage * size).map(c => {
+          const meta = TYPES[c.type as keyof typeof TYPES] || { icon: Sparkles, label: c.type, tone: '' }
+          const Icon = meta.icon
+          const open = expanded.includes(c.candidateId)
+          return <article key={c.candidateId} className="console-card">
+            <div className="console-card-head"><div className="console-card-title"><span className={'console-type-icon ' + meta.tone}><Icon size={21} /></span><div><h3>{c.title}</h3><div className="console-tags"><span className="console-tag">{meta.label}</span><StatusBadge status={c.status} /><span>置信度 {c.confidence == null ? '未提供' : Math.round(Math.max(0, Math.min(1, c.confidence)) * 100) + '%'}</span></div></div></div>
+              <div className="console-actions">{tab === 'pending' ? <><button className="console-button" onClick={() => ask(c, 'reject')}><X size={15} />拒绝</button><button className="console-button success" onClick={() => ask(c, 'approve')}><Check size={15} />批准</button></> : <button className="console-button primary" onClick={() => ask(c, 'retry')}><RotateCw size={15} />重试应用</button>}</div>
+            </div>
+            <p className="console-content"><span className={open ? '' : 'console-clamped'}>{c.content}</span></p>
+            <div className="console-card-foot"><div className="console-meta">
+              <span>创建于 {formatDate(c.createdAt)}</span>
+              {c.sourceTraceId && <Link to={'/traces?traceId=' + encodeURIComponent(c.sourceTraceId)} title={c.sourceTraceId}>查看来源 {c.sourceTraceId.slice(-8)} ↗</Link>}
+              {c.chatId && <span title={c.chatId}>会话 {c.chatId.slice(-8)}</span>}
+              {c.reviewedBy && <span>审核人 {c.reviewedBy}</span>}
+            </div><button className="console-link" aria-expanded={open} onClick={() => setExpanded(prev => open ? prev.filter(id => id !== c.candidateId) : [...prev, c.candidateId])}>{open ? '收起内容' : '展开全文'}</button></div>
+          </article>
+        })}</div>}
+      {!loading && !error && filtered.length > 0 && <ConsolePager page={currentPage} size={size} total={filtered.length} onPage={setPage} onSize={n => { setSize(n); setPage(1) }} />}
+    </section>
+    {confirmation && <ConsoleDialog title={ACTION_LABELS[confirmation.action] + '候选'} description={confirmation.action === 'approve' ? '批准后将触发候选应用，请确认内容准确、适合长期使用。' : confirmation.action === 'reject' ? '拒绝后，此候选将从待审核列表移除，请确认你的决定。' : '将重新尝试应用此候选，请确认此前的问题已处理。'} onClose={() => setConfirmation(null)} busy={busy}>
+      <strong>{confirmation.candidate.title}</strong><p className="console-content">{confirmation.candidate.content}</p><ConsoleNotice message={actionError} error />
+      <footer><button className="console-button" disabled={busy} onClick={() => setConfirmation(null)}>取消</button><button className={'console-button ' + (confirmation.action === 'reject' ? 'danger' : 'primary')} disabled={busy} onClick={act}>{busy ? '处理中…' : '确认' + ACTION_LABELS[confirmation.action]}</button></footer>
+    </ConsoleDialog>}
+  </div>
 }

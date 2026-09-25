@@ -65,7 +65,8 @@ public class GeneralProfile implements AgentProfile {
                 "searchNotes",
                 "deleteNote",
                 "listSkills",
-                "loadSkill"
+                "loadSkill",
+                "enterPlanMode"
         );
     }
     

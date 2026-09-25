@@ -37,21 +37,40 @@ public class DocumentIngestService {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
-    public IngestResult ingestFromFile(Path filePath, boolean force, IndexConfig indexConfig) throws IOException {
+    public IngestResult ingestFromFile(long userId, Path filePath, boolean force, IndexConfig indexConfig) throws IOException {
         String content = Files.readString(filePath, StandardCharsets.UTF_8);
         String title = filePath.getFileName().toString();
-        return ingest(title, filePath.toString(), content, force, indexConfig);
+        return ingest(userId, title, filePath.toString(), content, force, indexConfig);
     }
 
     /**
      * Backward-compatible overload: defaults to force=false, no IndexConfig.
      */
     public IngestResult ingestFromFile(Path filePath) throws IOException {
-        return ingestFromFile(filePath, false, null);
+        return ingestFromFile(1L, filePath, false, null);
     }
 
+    /** @deprecated Legacy global-document API. */
+    @Deprecated
+    public IngestResult ingestFromFile(Path filePath, boolean force, IndexConfig indexConfig) throws IOException {
+        String content = Files.readString(filePath, StandardCharsets.UTF_8);
+        return ingest(filePath.getFileName().toString(), filePath.toString(), content, force, indexConfig);
+    }
+
+    /** @deprecated User-scoped callers must pass the authenticated user id. */
+    @Deprecated
+    public IngestResult ingest(String title, String sourcePath, String content, boolean force, IndexConfig indexConfig) {
+        return ingestLegacy(title, sourcePath, content, force, indexConfig);
+    }
+
+    /** @deprecated User-scoped callers must pass the authenticated user id. */
+    @Deprecated
     public IngestResult ingest(String title, String sourcePath, String content) {
-        return ingest(title, sourcePath, content, false, null);
+        return ingestLegacy(title, sourcePath, content, false, null);
+    }
+
+    public IngestResult ingest(long userId, String title, String sourcePath, String content) {
+        return ingest(userId, title, sourcePath, content, false, null);
     }
 
     /**
@@ -64,7 +83,7 @@ public class DocumentIngestService {
      * 4. If embedding fails → return failure, old data untouched
      * 5. @Transactional: delete old chunks, update metadata, insert new chunks
      */
-    public IngestResult ingest(String title, String sourcePath, String content,
+    public IngestResult ingest(long userId, String title, String sourcePath, String content,
                                 boolean force, IndexConfig indexConfig) {
         log.info("Ingesting document: {} (force={})", title, force);
 
@@ -72,7 +91,7 @@ public class DocumentIngestService {
 
         // Check for existing document with same content hash
         Optional<KnowledgeRepository.KnowledgeDocumentRecord> existing =
-            knowledgeRepository.findByContentHash(contentHash);
+            knowledgeRepository.findByContentHash(userId, contentHash);
 
         // Fingerprint check: skip if matching and not forced
         if (existing.isPresent() && !force && indexConfig != null) {
@@ -135,7 +154,7 @@ public class DocumentIngestService {
         }
 
         // Create new document
-        String docId = saveDocumentAndChunks(title, sourcePath, newChunks, newVectors,
+        String docId = saveDocumentAndChunks(userId, title, sourcePath, newChunks, newVectors,
             contentHash, fingerprint);
         log.info("Successfully ingested document {} with {} chunks", docId, newChunks.size());
         return new IngestResult(docId, newChunks.size(), "Success", IngestStatus.CREATED);
@@ -144,16 +163,60 @@ public class DocumentIngestService {
     /**
      * Reindex an existing document with new content (content re-upload).
      */
-    public IngestResult reindex(String docId, String content, IndexConfig indexConfig) {
+    public IngestResult reindex(long userId, String docId, String content, IndexConfig indexConfig) {
         Optional<KnowledgeRepository.KnowledgeDocumentRecord> existing =
-            knowledgeRepository.findByDocId(docId);
+            knowledgeRepository.findByDocId(userId, docId);
 
         if (existing.isEmpty()) {
             throw new IllegalArgumentException("Document not found: " + docId);
         }
 
         KnowledgeRepository.KnowledgeDocumentRecord doc = existing.get();
-        return ingest(doc.title(), doc.sourcePath(), content, true, indexConfig);
+        return ingest(userId, doc.title(), doc.sourcePath(), content, true, indexConfig);
+    }
+
+    /** @deprecated Legacy global-document API. */
+    @Deprecated
+    public IngestResult reindex(String docId, String content, IndexConfig indexConfig) {
+        Optional<KnowledgeRepository.KnowledgeDocumentRecord> existing = knowledgeRepository.findByDocId(docId);
+        if (existing.isEmpty()) throw new IllegalArgumentException("Document not found: " + docId);
+        return ingest(existing.get().title(), existing.get().sourcePath(), content, true, indexConfig);
+    }
+
+    /**
+     * Legacy implementation retained solely for compatibility tests and old, unauthenticated
+     * import callers. New HTTP paths always use the user-scoped method above.
+     */
+    @Deprecated
+    private IngestResult ingestLegacy(String title, String sourcePath, String content, boolean force, IndexConfig indexConfig) {
+        String contentHash = computeSha256(content);
+        Optional<KnowledgeRepository.KnowledgeDocumentRecord> existing = knowledgeRepository.findByContentHash(contentHash);
+        String fingerprint = indexConfig == null ? null : IndexConfig.computeFingerprint(contentHash, indexConfig);
+        if (existing.isPresent() && !force && indexConfig != null && fingerprint.equals(existing.get().indexFingerprint())) {
+            knowledgeRepository.updateDocument(existing.get().docId());
+            return new IngestResult(existing.get().docId(), existing.get().chunkCount(), "No changes", IngestStatus.SKIPPED);
+        }
+        if (existing.isPresent() && !force && indexConfig == null) {
+            knowledgeRepository.updateDocument(existing.get().docId());
+            return new IngestResult(existing.get().docId(), existing.get().chunkCount(), "Already indexed", IngestStatus.SKIPPED);
+        }
+        List<MarkdownTextSplitter.DocumentChunk> chunks = textSplitter.split(content, "temp_" + System.currentTimeMillis());
+        if (chunks.isEmpty()) return new IngestResult(null, 0, "No content to index", null);
+        List<float[]> vectors = embeddingService.embedBatch(chunks.stream().map(chunk -> chunk.breadcrumb() + "\n" + chunk.content()).toList());
+        if (vectors.isEmpty()) return new IngestResult(null, 0, "Embedding generation failed", null);
+        if (existing.isPresent()) {
+            IngestStatus status = force ? IngestStatus.REINDEXED : IngestStatus.UPDATED;
+            atomicReplaceChunks(existing.get().docId(), title, sourcePath, chunks, vectors, contentHash, fingerprint);
+            return new IngestResult(existing.get().docId(), chunks.size(), status.name(), status);
+        }
+        String docId = transactionTemplate.execute(status -> {
+            String id = knowledgeRepository.saveDocument(title, sourcePath, chunks.size(), contentHash, fingerprint);
+            List<MarkdownTextSplitter.DocumentChunk> stored = chunks.stream().map(chunk -> new MarkdownTextSplitter.DocumentChunk(
+                chunk.chunkId().replace("temp_", id + "_"), id, chunk.chunkIndex(), chunk.breadcrumb(), chunk.content(), chunk.tokenCount())).toList();
+            knowledgeRepository.saveChunks(stored, vectors);
+            return id;
+        });
+        return new IngestResult(docId, chunks.size(), "Success", IngestStatus.CREATED);
     }
 
     protected void atomicReplaceChunks(String docId, String title, String sourcePath,
@@ -175,12 +238,12 @@ public class DocumentIngestService {
         });
     }
 
-    protected String saveDocumentAndChunks(String title, String sourcePath,
+    protected String saveDocumentAndChunks(long userId, String title, String sourcePath,
                                             List<MarkdownTextSplitter.DocumentChunk> newChunks,
                                             List<float[]> newVectors,
                                             String contentHash, String indexFingerprint) {
         return transactionTemplate.execute(status -> {
-            String docId = knowledgeRepository.saveDocument(title, sourcePath,
+            String docId = knowledgeRepository.saveDocument(userId, title, sourcePath,
                 newChunks.size(), contentHash, indexFingerprint);
 
             List<MarkdownTextSplitter.DocumentChunk> updatedChunks = newChunks.stream()
@@ -194,11 +257,17 @@ public class DocumentIngestService {
         });
     }
 
-    public void deleteDocument(String docId) {
-        knowledgeRepository.deleteDocument(docId);
+    public void deleteDocument(long userId, String docId) {
+        knowledgeRepository.deleteDocument(userId, docId);
         log.info("Deleted document: {}", docId);
     }
 
+    public List<KnowledgeRepository.KnowledgeDocumentRecord> listDocuments(long userId) {
+        return knowledgeRepository.listDocuments(userId);
+    }
+
+    /** @deprecated Legacy global-document API. */
+    @Deprecated
     public List<KnowledgeRepository.KnowledgeDocumentRecord> listDocuments() {
         return knowledgeRepository.listDocuments();
     }

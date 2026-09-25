@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxw.sxwaiagent.agent.dto.AgentRunCompletedEvent;
+import com.sxw.sxwaiagent.memory.UserMemoryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatModel;
@@ -48,6 +49,7 @@ public class HermesAnalyzer {
     private final HermesCandidateService candidateService;
     private final ObjectMapper objectMapper;
     private final ChatModel chatModel;
+    private final UserMemoryService userMemoryService;
 
     @Value("${sxw.hermes.llm-enabled:true}")
     private boolean llmEnabled;
@@ -57,10 +59,12 @@ public class HermesAnalyzer {
 
     public HermesAnalyzer(HermesCandidateService candidateService,
                           ObjectMapper objectMapper,
-                          ChatModel chatModel) {
+                          ChatModel chatModel,
+                          UserMemoryService userMemoryService) {
         this.candidateService = candidateService;
         this.objectMapper = objectMapper;
         this.chatModel = chatModel;
+        this.userMemoryService = userMemoryService;
     }
 
     @Async
@@ -89,7 +93,8 @@ public class HermesAnalyzer {
             boolean analyzed = false;
             if (llmEnabled) {
                 analyzed = analyzeWithLLM(requestId, event.getTraceId(), chatId,
-                        userMessage, assistantReply, toolCallCount);
+                        userMessage, assistantReply, toolCallCount, event.getProfileCode(),
+                        event.isMemoryWriteEnabled());
             }
             if (!analyzed) {
                 analyzeWithHeuristics(requestId, event.getTraceId(), chatId,
@@ -107,7 +112,8 @@ public class HermesAnalyzer {
      * @return true 表示 LLM 分析成功，false 表示需要回退启发式
      */
     private boolean analyzeWithLLM(String runId, String traceId, String chatId,
-                                    String userMessage, String assistantReply, int toolCallCount) {
+                                    String userMessage, String assistantReply, int toolCallCount,
+                                    String profileCode, boolean memoryWriteEnabled) {
         try {
             String userContent = buildAnalysisInput(userMessage, assistantReply, toolCallCount);
 
@@ -147,6 +153,16 @@ public class HermesAnalyzer {
                 String content = String.valueOf(item.getOrDefault("content", ""));
 
                 CandidateType candidateType = parseCandidateType(type);
+                if (candidateType == CandidateType.MEMORY) {
+                    if (!memoryWriteEnabled || chatId == null || chatId.isBlank()) {
+                        continue;
+                    }
+                    userMemoryService.inferredCandidate(chatId, "USER", title, content,
+                            profileCode == null || profileCode.isBlank() ? "GLOBAL" : "AGENT",
+                            profileCode == null || profileCode.isBlank() ? null : profileCode);
+                    created++;
+                    continue;
+                }
                 candidateService.createCandidate(
                         runId, chatId, candidateType, title, content,
                         objectMapper.writeValueAsString(Map.of(

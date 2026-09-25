@@ -42,6 +42,8 @@ class HermesControllerTest {
     void setUp() {
         HermesController controller = new HermesController(candidateService);
         this.mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .defaultRequest(get("/").principal(new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        "admin", "", List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ADMIN")))))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -112,7 +114,7 @@ class HermesControllerTest {
     @Test
     @DisplayName("POST /api/hermes/candidates/{id}/reject - 拒绝成功")
     void rejectCandidate_success() throws Exception {
-        when(candidateService.rejectCandidate("c-2", "reviewer")).thenReturn(true);
+        when(candidateService.rejectCandidate("c-2", "admin")).thenReturn(true);
 
         mockMvc.perform(post("/api/hermes/candidates/c-2/reject")
                         .param("reviewedBy", "reviewer"))
@@ -148,6 +150,22 @@ class HermesControllerTest {
     }
 
     // ───────────────────── helpers ─────────────────────
+
+    @Test void regularUserCannotReviewOrListSharedCandidates() throws Exception {
+        var auth = new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                "user", "", List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_USER")));
+        mockMvc.perform(get("/api/hermes/candidates").principal(auth)).andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/hermes/candidates/c-1/approve").principal(auth).param("reviewedBy", "admin"))
+                .andExpect(status().isForbidden());
+        org.mockito.Mockito.verifyNoInteractions(candidateService);
+    }
+
+    @Test void reviewerComesFromPrincipalNotQueryParameter() throws Exception {
+        when(candidateService.approveCandidate("c-1", "admin")).thenReturn(true);
+        mockMvc.perform(post("/api/hermes/candidates/c-1/approve").param("reviewedBy", "forged"))
+                .andExpect(status().isOk());
+        org.mockito.Mockito.verify(candidateService).approveCandidate("c-1", "admin");
+    }
 
     private HermesCandidate buildCandidate(String id, HermesCandidate.CandidateStatus status) {
         return new HermesCandidate(

@@ -1,22 +1,23 @@
 package com.sxw.sxwaiagent.evaluation;
 
-import com.sxw.sxwaiagent.agent.dto.AgentContext;
-import com.sxw.sxwaiagent.agent.dto.AgentResponse;
-import com.sxw.sxwaiagent.agent.profile.AgentProfile;
-import com.sxw.sxwaiagent.agent.profile.AgentProfileCode;
-import com.sxw.sxwaiagent.agent.runtime.AgentRuntime;
+import com.sxw.sxwaiagent.evaluation.harness.DeterministicEvalToolset;
+import com.sxw.sxwaiagent.evaluation.harness.EvalHarnessProperties;
+import com.sxw.sxwaiagent.evaluation.harness.HarnessEvalAdapter;
+import com.sxw.sxwaiagent.evaluation.harness.HarnessEvalAdapterRegistry;
+import com.sxw.sxwaiagent.evaluation.harness.HarnessEvalInput;
+import com.sxw.sxwaiagent.evaluation.harness.HarnessEvalOutput;
+import com.sxw.sxwaiagent.evaluation.harness.HarnessEvalSession;
+import com.sxw.sxwaiagent.evaluation.harness.HarnessTargetCode;
 import com.sxw.sxwaiagent.infrastructure.eval.CaseResult;
 import com.sxw.sxwaiagent.infrastructure.eval.LlmJudgeEvaluator;
-import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -29,63 +30,40 @@ import java.util.UUID;
 public class EvalExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(EvalExecutor.class);
-    private static final double JUDGE_PASS_THRESHOLD = 0.7;
-
-    private final List<AgentProfile> profileList;
-    private final List<AgentRuntime> runtimeList;
+    private final HarnessEvalAdapterRegistry adapterRegistry;
+    private final EvalHarnessProperties properties;
     private final ObjectProvider<LlmJudgeEvaluator> judgeProvider;
 
-    private Map<AgentProfileCode, AgentProfile> profileMap;
-    private AgentRuntime runtime;
-
     public EvalExecutor(
-        List<AgentProfile> profileList,
-        List<AgentRuntime> runtimeList,
+        HarnessEvalAdapterRegistry adapterRegistry,
+        EvalHarnessProperties properties,
         ObjectProvider<LlmJudgeEvaluator> judgeProvider
     ) {
-        this.profileList = profileList;
-        this.runtimeList = runtimeList;
+        this.adapterRegistry = adapterRegistry;
+        this.properties = properties;
         this.judgeProvider = judgeProvider;
     }
 
-    @PostConstruct
-    void init() {
-        profileMap = new HashMap<>();
-        for (AgentProfile p : profileList) {
-            profileMap.put(p.code(), p);
-        }
-        runtime = runtimeList.stream()
-            .filter(r -> r.getClass().getSimpleName().equals("ToolUseLoopRuntime"))
-            .findFirst()
-            .orElse(runtimeList.isEmpty() ? null : runtimeList.get(0));
-        log.info("EvalExecutor initialized: {} profiles, runtime={}",
-            profileMap.size(), runtime != null ? runtime.getClass().getSimpleName() : "NONE");
+    public EvalResult execute(EvalCase evalCase) {
+        return execute(evalCase, HarnessTargetCode.LOCAL);
     }
 
-    public EvalResult execute(EvalCase evalCase) {
+    public EvalResult execute(EvalCase evalCase, HarnessTargetCode target) {
         long startTime = System.currentTimeMillis();
         try {
-            AgentProfile profile = profileMap.get(AgentProfileCode.valueOf(evalCase.profileCode()));
-            if (profile == null) {
-                throw new IllegalArgumentException("Profile not found: " + evalCase.profileCode());
+            HarnessEvalAdapter adapter = adapterRegistry.require(target);
+            String legacyRun = "legacy-" + UUID.randomUUID().toString().substring(0, 8);
+            HarnessEvalOutput harnessOutput;
+            try (HarnessEvalSession session = adapter.openRun(legacyRun)) {
+                harnessOutput = session.execute(new HarnessEvalInput(legacyRun, evalCase.caseId(),
+                    evalCase.profileCode(), evalCase.inputPrompt(),
+                    DeterministicEvalToolset.NAMES.stream().sorted().toList(),
+                    Duration.ofSeconds(properties.dsh().caseTimeoutSeconds()), 1));
             }
-            if (runtime == null) {
-                throw new IllegalStateException("No runtime configured");
+            if (!harnessOutput.successful()) {
+                throw new IllegalStateException(harnessOutput.errorCategory() + ": " + harnessOutput.errorMessage());
             }
-
-            String requestId = "eval-" + UUID.randomUUID().toString().substring(0, 8);
-            AgentContext context = AgentContext.builder()
-                .requestId(requestId)
-                .traceId("trace-" + requestId)
-                .chatId("eval-chat-" + evalCase.caseId())
-                .profile(profile)
-                .userMessage(evalCase.inputPrompt())
-                .history(List.of())
-                .metadata(Map.of("evalCaseId", evalCase.caseId()))
-                .build();
-
-            AgentResponse response = runtime.execute(context);
-            String actualOutput = response.answer();
+            String actualOutput = harnessOutput.answer();
             long durationMs = System.currentTimeMillis() - startTime;
 
             // Phase 1: Keyword validation
@@ -154,13 +132,21 @@ public class EvalExecutor {
     }
 
     public List<EvalResult> executeBatch(List<EvalCase> cases) {
+        return executeBatch(cases, HarnessTargetCode.LOCAL);
+    }
+
+    public List<EvalResult> executeBatch(List<EvalCase> cases, HarnessTargetCode target) {
         List<EvalResult> results = new ArrayList<>();
+        long deadline = System.nanoTime() + Duration.ofMinutes(30).toNanos();
         for (EvalCase evalCase : cases) {
+            if (Thread.currentThread().isInterrupted() || System.nanoTime() > deadline) {
+                throw new IllegalStateException("评测运行超过 30 分钟或已中断");
+            }
             if (!evalCase.canRun()) {
                 log.warn("Skipping eval case: {} (status={})", evalCase.caseId(), evalCase.status());
                 continue;
             }
-            results.add(execute(evalCase));
+            results.add(execute(evalCase, target));
         }
         return results;
     }

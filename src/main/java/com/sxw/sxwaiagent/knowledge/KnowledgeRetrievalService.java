@@ -17,6 +17,8 @@ import java.util.stream.Collectors;
 public class KnowledgeRetrievalService {
 
     private final List<KnowledgeRetriever> retrievers;
+    private final KnowledgeRepository repository;
+    private final EmbeddingService embeddingService;
 
     @Value("${sxw.knowledge.rrf.enabled:true}")
     private boolean rrfEnabled;
@@ -24,8 +26,10 @@ public class KnowledgeRetrievalService {
     @Value("${sxw.knowledge.rrf.k:60}")
     private int rrfK;
 
-    public KnowledgeRetrievalService(List<KnowledgeRetriever> retrievers) {
+    public KnowledgeRetrievalService(List<KnowledgeRetriever> retrievers, KnowledgeRepository repository, EmbeddingService embeddingService) {
         this.retrievers = retrievers;
+        this.repository = repository;
+        this.embeddingService = embeddingService;
         log.info("Initialized KnowledgeRetrievalService with {} retrievers: {}",
             retrievers.size(),
             retrievers.stream().map(KnowledgeRetriever::getName).toList());
@@ -154,6 +158,21 @@ public class KnowledgeRetrievalService {
      */
     public KnowledgeRetrievalResult retrieve(String query) {
         return retrieveFromAll(query, 5, 0.5);
+    }
+
+    /** Retrieves only documents owned and explicitly selected by the current user. */
+    public KnowledgeRetrievalResult retrieveForUser(long userId, List<String> documentIds, String query, int topK, double minScore) {
+        if (query == null || query.isBlank() || documentIds == null || documentIds.isEmpty()) return KnowledgeRetrievalResult.empty(query);
+        if (repository.countOwnedDocuments(userId, documentIds) != documentIds.size()) {
+            throw new IllegalArgumentException("One or more knowledge documents are unavailable");
+        }
+        long start = System.currentTimeMillis();
+        float[] embedding = embeddingService.embed(query);
+        if (embedding.length == 0) return KnowledgeRetrievalResult.empty(query);
+        List<KnowledgeChunk> chunks = repository.findSimilarChunks(userId, documentIds, embedding, topK, minScore).stream()
+            .map(row -> new KnowledgeChunk(row.chunkId(), row.content(), row.similarity(), "private-pgvector", row.docId(), row.docId()))
+            .toList();
+        return new KnowledgeRetrievalResult(chunks, chunks.size(), query, System.currentTimeMillis() - start);
     }
 
     /**

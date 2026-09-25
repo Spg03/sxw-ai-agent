@@ -3,6 +3,7 @@ package com.sxw.sxwaiagent.agent.tool;
 import com.sxw.sxwaiagent.agent.profile.AgentProfile;
 import com.sxw.sxwaiagent.agent.profile.ToolRiskLevel;
 import com.sxw.sxwaiagent.agent.trace.TraceRecorder;
+import com.sxw.sxwaiagent.security.PromptSafetyDecision;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.ToolCallback;
@@ -76,6 +77,9 @@ public class ToolExecutor {
      * @return 工具执行结果
      */
     public ToolResult execute(String toolName, String arguments, String requestId, String traceId, int turn, AgentProfile profile) {
+        return execute(toolName, arguments, requestId, traceId, turn, profile, null);
+    }
+    public ToolResult execute(String toolName, String arguments, String requestId, String traceId, int turn, AgentProfile profile, PromptSafetyDecision safetyDecision) {
         long startTime = System.currentTimeMillis();
 
         log.info("[{}] Executing tool: {} (turn {})", requestId, toolName, turn);
@@ -92,6 +96,11 @@ public class ToolExecutor {
 
         // 2. 参数校验（Validator 链）
         ToolDefinition toolDef = toolRegistry.get(toolName).orElse(null);
+        if (safetyDecision != null && safetyDecision.blockDangerousTools() && toolDef != null && toolDef.riskLevel().ordinal() >= ToolRiskLevel.EXTERNAL_WRITE.ordinal()) {
+            String reason = "Tool blocked by prompt-injection safety policy";
+            auditLog.record(requestId, traceId, turn, toolName, toolDef.riskLevel(), arguments, reason, "security_blocked", 0, false, null);
+            return ToolResult.failure(reason);
+        }
         for (ToolValidator validator : validators) {
             ToolValidator.ValidationResult vr = validator.validate(toolName, arguments, toolDef);
             if (!vr.valid()) {

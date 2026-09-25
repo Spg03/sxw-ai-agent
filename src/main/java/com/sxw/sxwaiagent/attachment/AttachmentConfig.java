@@ -5,5 +5,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 @Configuration @EnableConfigurationProperties(AttachmentProperties.class)
 public class AttachmentConfig {
- @Bean MinioClient minioClient(AttachmentProperties p) { return MinioClient.builder().endpoint(p.endpoint()).credentials(p.accessKey(),p.secretKey()).build(); }
+ @Bean MinioClient minioClient(AttachmentProperties p) {
+  MinioClient client = MinioClient.builder().endpoint(p.endpoint()).credentials(p.accessKey(),p.secretKey()).build();
+  client.setTimeout(10000, 30000, 30000);
+  return client;
+ }
 }

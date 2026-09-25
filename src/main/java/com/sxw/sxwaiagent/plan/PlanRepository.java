@@ -108,7 +108,7 @@ public class PlanRepository {
     
     public List<Plan> findByChatId(String chatId) {
         return jdbcTemplate.query("""
-            SELECT DISTINCT plan_id FROM ai_plan WHERE chat_id = ? ORDER BY created_at DESC
+            SELECT plan_id FROM ai_plan WHERE chat_id = ? ORDER BY created_at DESC, plan_id
             """,
             (rs, rowNum) -> {
                 String planId = rs.getString("plan_id");

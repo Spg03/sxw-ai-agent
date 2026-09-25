@@ -72,12 +72,11 @@ class ApiClient {
     isRetry = false,
   ): Promise<Result<T>> {
     const token = this.getToken()
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    }
+    const headers = new Headers(options.headers)
+    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
 
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`
+      headers.set('Authorization', `Bearer ${token}`)
     }
 
     const response = await fetch(`${API_BASE}${path}`, {
@@ -159,6 +158,14 @@ class ApiClient {
     return this.request<T>(path, {
       method: 'POST',
       body: body ? JSON.stringify(body) : undefined,
+    }, options)
+  }
+
+  async postText<T>(path: string, body: string, options?: RequestOptions): Promise<Result<T>> {
+    return this.request<T>(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body,
     }, options)
   }
 

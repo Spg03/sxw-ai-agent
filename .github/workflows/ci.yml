@@ -19,6 +19,22 @@ jobs:
   test:
     name: Build & Unit Test (JDK 21)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: agentforge_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: integration-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agentforge_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_POSTGRES_URL: jdbc:postgresql://localhost:5432/agentforge_test
+      TEST_POSTGRES_USER: postgres
+      TEST_POSTGRES_PASSWORD: integration-test-only
     steps:
       - uses: actions/checkout@v4
 
@@ -71,6 +87,12 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: API regression tests
+        run: npm test
+
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high
 
       - name: Build
         run: npm run build

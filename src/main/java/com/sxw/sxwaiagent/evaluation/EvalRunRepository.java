@@ -111,12 +111,32 @@ public class EvalRunRepository {
         jdbcTemplate.update(sql, status.name(), runId);
     }
 
+    public boolean claim(String runId) {
+        return jdbcTemplate.update("""
+            UPDATE ai_eval_run SET status='RUNNING', started_at=CURRENT_TIMESTAMP
+            WHERE run_id=? AND status='PENDING'
+            """, runId) == 1;
+    }
+
+    public List<EvalRun> pendingRuns() {
+        return jdbcTemplate.query("SELECT * FROM ai_eval_run WHERE status='PENDING' ORDER BY started_at LIMIT 10",
+                new EvalRunRowMapper());
+    }
+
+    public void failAbandonedRuns() {
+        jdbcTemplate.update("""
+            UPDATE ai_eval_run SET status='FAILED', completed_at=CURRENT_TIMESTAMP,
+                error_message='运行中断或超过恢复期限，请手动创建新评测'
+            WHERE status='RUNNING' AND started_at < ?
+            """, LocalDateTime.now().minusHours(2));
+    }
+
     public void updateResults(String runId, EvalRunStatus status, int passed, int failed, int skipped, double passRate, long durationMs) {
         String sql = """
             UPDATE ai_eval_run 
             SET status = ?, passed_cases = ?, failed_cases = ?, skipped_cases = ?,
                 pass_rate = ?, duration_ms = ?, completed_at = CURRENT_TIMESTAMP
-            WHERE run_id = ?
+            WHERE run_id = ? AND status = 'RUNNING'
             """;
         jdbcTemplate.update(sql, status.name(), passed, failed, skipped, passRate, durationMs, runId);
     }
@@ -125,7 +145,7 @@ public class EvalRunRepository {
         String sql = """
             UPDATE ai_eval_run 
             SET status = 'FAILED', error_message = ?, completed_at = CURRENT_TIMESTAMP
-            WHERE run_id = ?
+            WHERE run_id = ? AND status = 'RUNNING'
             """;
         jdbcTemplate.update(sql, errorMessage, runId);
     }

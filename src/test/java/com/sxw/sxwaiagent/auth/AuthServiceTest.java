@@ -87,6 +87,37 @@ class AuthServiceTest {
         return properties;
     }
 
+    @Test void concurrentRefreshLoserMustNotIssueTokens() {
+        var users = mock(UserAccountRepository.class);
+        var tokens = mock(RefreshTokenRepository.class);
+        var props = authProperties();
+        var service = new AuthService(users, tokens, new BCryptPasswordEncoder(), tokenService(props),
+                mock(TokenBlacklistService.class), props);
+        String hash = JwtTokenService.getTokenHash("refresh");
+        when(tokens.findByTokenHash(hash)).thenReturn(Optional.of(com.sxw.sxwaiagent.auth.model.RefreshToken
+                .create(hash, "alice", java.time.Instant.now().plusSeconds(600))));
+        when(tokens.revokeByTokenHash(hash)).thenReturn(0);
+        assertThrows(IllegalArgumentException.class, () -> service.refreshToken("refresh"));
+        verify(tokens, org.mockito.Mockito.never()).save(any());
+    }
+
+    @Test void refreshReturnsCurrentUserAndRotatesToken() {
+        var users = mock(UserAccountRepository.class);
+        var tokens = mock(RefreshTokenRepository.class);
+        var props = authProperties();
+        var service = new AuthService(users, tokens, new BCryptPasswordEncoder(), tokenService(props),
+                mock(TokenBlacklistService.class), props);
+        String hash = JwtTokenService.getTokenHash("refresh");
+        when(tokens.findByTokenHash(hash)).thenReturn(Optional.of(com.sxw.sxwaiagent.auth.model.RefreshToken
+                .create(hash, "alice", java.time.Instant.now().plusSeconds(600))));
+        when(tokens.revokeByTokenHash(hash)).thenReturn(1);
+        when(users.findByUsername("alice")).thenReturn(Optional.of(UserAccount.create("alice", "hash", "Alice")));
+        var result = service.refreshToken("refresh");
+        assertEquals("alice", result.user().username());
+        assertNotNull(result.refreshToken());
+        verify(tokens).save(any());
+    }
+
     private static JwtTokenService tokenService(AuthProperties properties) {
         return new JwtTokenService(properties);
     }

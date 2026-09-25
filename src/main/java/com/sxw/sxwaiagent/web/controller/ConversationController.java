@@ -20,7 +20,8 @@ public class ConversationController {
     @GetMapping("/{id}") public Result<ConversationSummary> get(Authentication a,@PathVariable String id) { return Result.ok(service.get(user(a),id)); }
     @GetMapping("/{id}/messages") public Result<List<ConversationMessage>> messages(Authentication a,@PathVariable String id,@RequestParam(defaultValue="100") int limit) { return Result.ok(service.messages(user(a),id,limit)); }
     @PatchMapping("/{id}") public Result<ConversationSummary> update(Authentication a,@PathVariable String id,@RequestBody Update body) { return Result.ok(service.update(user(a),id,body.title(),body.profile(),body.pinned())); }
-    @DeleteMapping("/{id}") public Result<Void> delete(Authentication a,@PathVariable String id) { service.delete(user(a),id); return Result.ok(); }
+    @GetMapping("/{id}/deletion-preview") public Result<ConversationService.DeletionPreview> deletionPreview(Authentication a,@PathVariable String id) { return Result.ok(service.deletionPreview(user(a),id)); }
+    @DeleteMapping("/{id}") public Result<Void> delete(Authentication a,@PathVariable String id,@RequestParam(defaultValue="false") boolean purgeInferredMemories) { service.delete(user(a),id,purgeInferredMemories); return Result.ok(); }
     private long user(Authentication a) { return ((AuthenticatedUser)a.getPrincipal()).userId(); }
     public record Create(@Size(max=160) String title, AgentProfileCode profile) {}
     public record Update(@Size(max=160) String title, AgentProfileCode profile, Boolean pinned) {}

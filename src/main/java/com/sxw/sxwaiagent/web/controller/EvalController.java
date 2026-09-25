@@ -54,7 +54,7 @@ public class EvalController {
 
     @Operation(summary = "创建评测用例", description = "创建新的评测用例，初始状态为 DRAFT")
     @PostMapping("/cases")
-    public Result<EvalCase> createCase(@RequestBody CreateCaseRequest request) {
+    public Result<EvalCase> createCase(@jakarta.validation.Valid @RequestBody CreateCaseRequest request) {
         log.info("Creating eval case: {}", request.name());
 
         EvalCaseType caseType = request.caseType() != null
@@ -88,9 +88,23 @@ public class EvalController {
 
     // ==================== Runs ====================
 
-    @Operation(summary = "执行评测", description = "创建并立即执行一次评测运行，支持指定用例或全量活跃用例")
+    @PostMapping("/cases/{caseId}/activate")
+    public Result<EvalCase> activateCase(@PathVariable String caseId) {
+        evalService.activateCase(caseId);
+        return Result.ok(evalService.findCase(caseId).orElseThrow());
+    }
+
+    @PostMapping("/cases/{caseId}/disable")
+    public Result<EvalCase> disableCase(@PathVariable String caseId) {
+        evalService.findCase(caseId).orElseThrow(() -> new IllegalArgumentException("Eval case not found"));
+        evalService.disableCase(caseId);
+        return Result.ok(evalService.findCase(caseId).orElseThrow());
+    }
+
+    @Operation(summary = "提交评测", description = "持久化排队后立即返回，后台执行；通过运行详情查询结果")
     @PostMapping("/run")
-    public Result<EvalRun> runEval(@RequestBody RunEvalRequest request) {
+    public Result<EvalRun> runEval(@jakarta.validation.Valid @RequestBody RunEvalRequest request,
+                                  org.springframework.security.core.Authentication authentication) {
         log.info("Running eval: {} with {} cases",
             request.name(), request.caseIds() != null ? request.caseIds().size() : "all");
 
@@ -98,7 +112,7 @@ public class EvalController {
 
         List<String> caseIds = request.caseIds();
         if (caseIds == null || caseIds.isEmpty()) {
-            caseIds = evalService.findAllActiveCases().stream()
+            caseIds = evalService.findCasesByProfile(profileCode).stream()
                 .map(EvalCase::caseId)
                 .toList();
         }
@@ -107,14 +121,10 @@ public class EvalController {
             request.name() != null ? request.name() : "Manual Run",
             profileCode,
             caseIds,
-            "api"
+            authentication.getName()
         );
 
-        evalService.executeRun(run.runId());
-
-        return evalService.findRun(run.runId())
-            .map(Result::ok)
-            .orElse(Result.ok(run));
+        return Result.ok(run);
     }
 
     @Operation(summary = "列出所有评测运行")
@@ -220,8 +230,8 @@ public class EvalController {
     ) {}
 
     public record RunEvalRequest(
-        String name,
+        @jakarta.validation.constraints.Size(max=200) String name,
         String profileCode,
-        List<String> caseIds
+        @jakarta.validation.constraints.Size(max=100) List<@NotBlank String> caseIds
     ) {}
 }

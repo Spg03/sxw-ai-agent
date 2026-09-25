@@ -11,7 +11,11 @@ public record TreeholeResponse(
         String emotionTag,
         String hermesSummary,
         String hermesReply,
-        Instant createdAt
+        String mood,
+        boolean favorite,
+        boolean archived,
+        Instant createdAt,
+        Instant updatedAt
 ) {
     public static TreeholeResponse from(TreeholeEntry entry) {
         return new TreeholeResponse(
@@ -21,7 +25,11 @@ public record TreeholeResponse(
                 entry.getEmotionTag(),
                 entry.getHermesSummary(),
                 entry.getHermesReply(),
-                entry.getCreatedAt()
+                entry.getMood(),
+                entry.isFavorite(),
+                entry.isArchived(),
+                entry.getCreatedAt(),
+                entry.getUpdatedAt()
         );
     }
 }

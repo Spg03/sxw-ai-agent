@@ -14,8 +14,8 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * Agent Skills 调试 / 前端展示端点。
- * 不做权限控制（与现有 controller 风格一致），生产环境请放在内网或加 actuator 风格的网关。
+ * Agent Skills 查询端点。鉴权由全局 SecurityFilterChain 统一执行；
+ * 此接口只暴露已通过后端审核并装载到 SkillRegistry 的技能。
  */
 @Tag(name = "技能管理", description = "Agent 技能的查询与详情展示")
 @RestController

@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { agentApi } from '../api/agent'
+import { agentApi, type ConversationDeletionPreview } from '../api/agent'
 import {
   Activity, BookOpen, BrainCircuit, ChevronRight, Grid2X2, Heart,
   History, LogOut, MessageSquarePlus, NotebookPen, Search, Sparkles,
-  TestTube, Wrench,
+  TestTube, Wrench, Trash2, X,
 } from 'lucide-react'
+import BrandLogo from './BrandLogo'
 
 interface LayoutProps { children: ReactNode }
 interface StoredSession { id: string; title: string; updatedAt: string; messages: unknown[] }
@@ -28,10 +29,6 @@ function relativeTime(value: string) {
   return `${Math.floor(minutes / 1440)} 天前`
 }
 
-function SidebarMark() {
-  return <div className="workspace-mark"><div /><Heart size={18} fill="currentColor" /><Sparkles size={10} /></div>
-}
-
 const toolboxItems = [
   { path: '/notes', icon: NotebookPen, label: '笔记' },
   { path: '/knowledge', icon: BookOpen, label: '知识库' },
@@ -47,6 +44,7 @@ export default function Layout({ children }: LayoutProps) {
   const [query, setQuery] = useState('')
   const [toolboxOpen, setToolboxOpen] = useState(false)
   const [history, setHistory] = useState<StoredSession[]>([])
+  const [deleteDialog, setDeleteDialog] = useState<{ session: StoredSession; preview: ConversationDeletionPreview; purge: boolean } | null>(null)
   const name = user?.nickname || user?.username || '用户'
 
   useEffect(() => {
@@ -67,11 +65,24 @@ export default function Layout({ children }: LayoutProps) {
   const filteredHistory = history.filter(item => item.title.toLowerCase().includes(query.toLowerCase()))
   const isActive = (path: string) => location.pathname === path
   const chatWorkspace = location.pathname === '/chat'
+  const beginDelete = async (session: StoredSession) => {
+    const preview = await agentApi.conversationDeletionPreview(session.id).then(result => result.data)
+    setDeleteDialog({ session, preview, purge: false })
+  }
+  const confirmDelete = async () => {
+    if (!deleteDialog) return
+    const id = deleteDialog.session.id
+    await agentApi.deleteConversation(id, deleteDialog.purge)
+    setHistory(items => items.filter(item => item.id !== id))
+    if (new URLSearchParams(location.search).get('session') === id) navigate(`/chat?new=${Date.now()}`)
+    setDeleteDialog(null)
+    window.dispatchEvent(new Event('agentforge-history-updated'))
+  }
 
   return <div className="workspace-shell">
     <aside className="workspace-sidebar">
       <div className="workspace-top">
-        <Link to="/" className="workspace-brand"><SidebarMark /><span>AgentForge</span></Link>
+        <Link to="/" className="workspace-brand"><BrandLogo /></Link>
         <label className="workspace-search"><Search size={17} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索会话" /><kbd>Ctrl K</kbd></label>
         <nav className="workspace-nav">
           <Link to="/" className={isActive('/') ? 'active' : ''}><Grid2X2 size={19} />仪表盘</Link>
@@ -84,9 +95,10 @@ export default function Layout({ children }: LayoutProps) {
           </div>
         </nav>
       </div>
-      <section className="workspace-history"><div className="workspace-history-title"><span>历史对话</span><History size={15} /></div><div className="workspace-history-scroll">{filteredHistory.length ? filteredHistory.map(session => <button key={session.id} onClick={() => navigate(`/chat?session=${encodeURIComponent(session.id)}`)} className={new URLSearchParams(location.search).get('session') === session.id ? 'active' : ''}><span className="history-dot">◌</span><span className="history-content"><strong>{session.title}</strong><small>{session.messages?.length ?? 0} 条消息 · {relativeTime(session.updatedAt)}</small></span></button>) : <p className="workspace-history-empty">{query ? '没有匹配的会话' : '还没有历史对话'}</p>}</div></section>
+      <section className="workspace-history"><div className="workspace-history-title"><span>历史对话</span><History size={15} /></div><div className="workspace-history-scroll">{filteredHistory.length ? filteredHistory.map(session => <div className="workspace-history-row" key={session.id}><button className={`workspace-history-open ${new URLSearchParams(location.search).get('session') === session.id ? 'active' : ''}`} onClick={() => navigate(`/chat?session=${encodeURIComponent(session.id)}`)}><span className="history-dot">◌</span><span className="history-content"><strong>{session.title}</strong><small>{session.messages?.length ?? 0} 条消息 · {relativeTime(session.updatedAt)}</small></span></button><button className="workspace-history-delete" onClick={() => void beginDelete(session)} title="删除会话"><Trash2 size={14} /></button></div>) : <p className="workspace-history-empty">{query ? '没有匹配的会话' : '还没有历史对话'}</p>}</div></section>
       <div className="workspace-user"><div className="workspace-avatar">{name[0]?.toUpperCase() || 'U'}</div><div><strong>{name}</strong><span>{user?.username || 'AgentForge 用户'}</span></div><button onClick={logout} title="退出登录"><LogOut size={18} /></button></div>
     </aside>
     <main className="workspace-main"><div className={chatWorkspace ? 'chat-page-host animate-fade-in' : 'workspace-content animate-fade-in'}>{children}</div></main>
+    {deleteDialog && <div className="conversation-delete-backdrop" role="dialog" aria-modal="true"><section className="conversation-delete-dialog"><header><strong>删除“{deleteDialog.session.title}”</strong><button onClick={() => setDeleteDialog(null)}><X size={17} /></button></header><p>将删除 {deleteDialog.preview.messageCount} 条消息和 {deleteDialog.preview.attachmentCount} 个附件，原始会话数据无法恢复。</p>{deleteDialog.preview.inferredMemoryCount > 0 && <label><input type="checkbox" checked={deleteDialog.purge} onChange={event => setDeleteDialog(value => value ? { ...value, purge: event.target.checked } : value)} /><span><strong>同时永久删除推断记忆</strong><small>共 {deleteDialog.preview.inferredMemoryCount} 条；明确要求保存的记忆不受影响。</small></span></label>}<footer><button onClick={() => setDeleteDialog(null)}>取消</button><button onClick={() => void confirmDelete()}>确认删除</button></footer></section></div>}
   </div>
 }

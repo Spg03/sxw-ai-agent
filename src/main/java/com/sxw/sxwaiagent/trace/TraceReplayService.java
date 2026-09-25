@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Optional;
+import com.sxw.sxwaiagent.memory.AgentRunSnapshotService;
 
 @Service
 public class TraceReplayService {
@@ -13,9 +14,11 @@ public class TraceReplayService {
     private static final Logger log = LoggerFactory.getLogger(TraceReplayService.class);
     
     private final TraceRepository traceRepository;
+    private final AgentRunSnapshotService snapshots;
     
-    public TraceReplayService(TraceRepository traceRepository) {
+    public TraceReplayService(TraceRepository traceRepository, AgentRunSnapshotService snapshots) {
         this.traceRepository = traceRepository;
+        this.snapshots = snapshots;
     }
     
     public Optional<TraceRecord> getTrace(String traceId) {
@@ -32,29 +35,27 @@ public class TraceReplayService {
     
     public TraceReplayResult replay(String traceId) {
         Optional<TraceRecord> traceOpt = traceRepository.findByTraceId(traceId);
-        
-        if (traceOpt.isEmpty()) {
-            log.warn("Trace not found: {}", traceId);
-            return new TraceReplayResult(false, null, "Trace not found");
-        }
-        
-        TraceRecord trace = traceOpt.get();
-        
-        // TODO: Actually replay the trace by re-executing with same input
-        // For now, just return the original trace data
-        
         log.info("Replaying trace: {}", traceId);
-        
-        return new TraceReplayResult(
-            true,
-            trace,
-            "Replay completed (original trace returned)"
-        );
+        try {
+            AgentRunSnapshotService.ReplayInput input = snapshots.replayInputByTraceId(traceId);
+            return new TraceReplayResult(input.hashVerified(), traceOpt.orElse(null), input,
+                    input.hashVerified()
+                            ? "Equivalent model input reconstructed and SHA-256 verified (call " + input.callNo() + ")"
+                            : "Snapshot hash verification failed");
+        } catch (IllegalArgumentException noSnapshot) {
+            if (traceOpt.isEmpty()) {
+                log.warn("Trace and replay snapshot not found: {}", traceId);
+                return new TraceReplayResult(false, null, null, "Trace not found");
+            }
+            return new TraceReplayResult(false, traceOpt.get(), null,
+                    "Legacy trace has no context snapshot and cannot be replayed safely");
+        }
     }
     
     public record TraceReplayResult(
         boolean success,
         TraceRecord trace,
+        AgentRunSnapshotService.ReplayInput replayInput,
         String message
     ) {}
 }

@@ -9,6 +9,8 @@ RUN --mount=type=cache,target=/root/.m2 mvn -q -B -e -DskipTests dependency:go-o
 
 # 再复制源码构建
 COPY src ./src
+COPY frontend/package.json frontend/package-lock.json ./frontend/
+COPY frontend ./frontend
 RUN --mount=type=cache,target=/root/.m2 mvn -q -B -DskipTests package
 
 # ---------- 运行阶段 ----------
@@ -16,7 +18,9 @@ FROM eclipse-temurin:21-jre
 WORKDIR /app
 
 # 非 root 用户
-RUN useradd -r -u 1001 -g root appuser
+RUN apt-get update && apt-get install -y --no-install-recommends wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -u 1001 -g root appuser
 USER 1001
 
 COPY --from=build /workspace/target/sxw-ai-agent-*.jar /app/app.jar

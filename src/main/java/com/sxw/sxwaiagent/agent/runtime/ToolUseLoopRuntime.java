@@ -14,6 +14,11 @@ import com.sxw.sxwaiagent.agent.tool.ToolResult;
 import com.sxw.sxwaiagent.common.web.ClientAbortDetector;
 import com.sxw.sxwaiagent.plan.AgentRunMode;
 import com.sxw.sxwaiagent.plan.PlanReviewService;
+import com.sxw.sxwaiagent.security.PromptSafetyDecision;
+import com.sxw.sxwaiagent.context.ContextBudgetAllocator;
+import com.sxw.sxwaiagent.context.ContextBudgetExceededException;
+import com.sxw.sxwaiagent.conversation.ConversationEventService;
+import com.sxw.sxwaiagent.memory.AgentRunSnapshotService;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -26,7 +31,6 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -41,9 +45,12 @@ import reactor.core.publisher.Flux;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeoutException;
@@ -78,12 +85,10 @@ public class ToolUseLoopRuntime implements AgentRuntime {
     private static final Logger log = LoggerFactory.getLogger(ToolUseLoopRuntime.class);
 
     private static final String RESILIENCE_INSTANCE = "dashscope";
-    private static final int DEFAULT_HISTORY_MESSAGES = 20;
     
     private final ChatModel chatModel;
     private final ToolExecutor toolExecutor;
     private final ApplicationEventPublisher eventPublisher;
-    private final ChatMemory chatMemory;
     private final PromptAssembler promptAssembler;
     private final PromptRunRecorder promptRunRecorder;
     private final Executor agentTaskExecutor;
@@ -91,6 +96,9 @@ public class ToolUseLoopRuntime implements AgentRuntime {
     private final CircuitBreaker circuitBreaker;
     private final PlanReviewService planReviewService;
     private final ToolRegistry toolRegistry;
+    private final ContextBudgetAllocator contextBudgetAllocator;
+    private final AgentRunSnapshotService snapshots;
+    private final ConversationEventService conversationEvents;
     
     @Value("${sxw.agent.runtime.max-turns:10}")
     private int maxTurns;
@@ -100,6 +108,9 @@ public class ToolUseLoopRuntime implements AgentRuntime {
     
     @Value("${sxw.agent.runtime.max-retries:3}")
     private int maxRetries;
+
+    @Value("${search-api.api-key:}")
+    private String searchApiKey;
 
     /**
      * 工具消息协议模式：
@@ -113,19 +124,20 @@ public class ToolUseLoopRuntime implements AgentRuntime {
             ChatModel chatModel,
             ToolExecutor toolExecutor,
             ApplicationEventPublisher eventPublisher,
-            ChatMemory agentChatMemory,
             PromptAssembler promptAssembler,
             PromptRunRecorder promptRunRecorder,
             @Qualifier("agentTaskExecutor") Executor agentTaskExecutor,
             RetryRegistry retryRegistry,
             CircuitBreakerRegistry circuitBreakerRegistry,
             PlanReviewService planReviewService,
-            ToolRegistry toolRegistry
+            ToolRegistry toolRegistry,
+            ContextBudgetAllocator contextBudgetAllocator,
+            AgentRunSnapshotService snapshots,
+            ConversationEventService conversationEvents
     ) {
         this.chatModel = chatModel;
         this.toolExecutor = toolExecutor;
         this.eventPublisher = eventPublisher;
-        this.chatMemory = agentChatMemory;
         this.promptAssembler = promptAssembler;
         this.promptRunRecorder = promptRunRecorder;
         this.agentTaskExecutor = agentTaskExecutor;
@@ -133,6 +145,9 @@ public class ToolUseLoopRuntime implements AgentRuntime {
         this.circuitBreaker = circuitBreakerRegistry.circuitBreaker(RESILIENCE_INSTANCE);
         this.planReviewService = planReviewService;
         this.toolRegistry = toolRegistry;
+        this.contextBudgetAllocator = contextBudgetAllocator;
+        this.snapshots = snapshots;
+        this.conversationEvents = conversationEvents;
     }
     
     @Override
@@ -143,10 +158,7 @@ public class ToolUseLoopRuntime implements AgentRuntime {
         log.info("[{}] ToolUseLoopRuntime executing for profile={}", context.requestId(), profile.code());
         
         // 历史消息（裁剪防止溢出）
-        List<Message> trimmedHistory = null;
-        if (context.history() != null) {
-            trimmedHistory = trimHistory(context.history(), resolveMaxHistory(context));
-        }
+        List<Message> sourceHistory = context.history() == null ? List.of() : context.history();
         
         // 执行 Tool-Use Loop
         List<AgentResponse.ToolCallInfo> toolCalls = new ArrayList<>();
@@ -165,7 +177,6 @@ public class ToolUseLoopRuntime implements AgentRuntime {
             AssembledPrompt assembledPrompt = promptAssembler.assemble(profile, loopContext);
             
             // 记录 Prompt 元数据
-            promptRunRecorder.record(context.requestId(), profile.code().name(), turn, assembledPrompt);
             log.debug("[{}] Turn {} prompt: sections={}, rendered={} chars, staticHash={}, dynamicHash={}",
                     context.requestId(), turn,
                     assembledPrompt.sections().size(),
@@ -173,28 +184,37 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                     assembledPrompt.staticHash().substring(0, Math.min(8, assembledPrompt.staticHash().length())),
                     assembledPrompt.dynamicHash().substring(0, Math.min(8, assembledPrompt.dynamicHash().length())));
             
-            // 构建消息列表
+            List<Message> priorToolMessages = buildToolMessages(toolCalls, toolMessagePairs);
+            ContextBudgetAllocator.BudgetedContext budgeted = contextBudgetAllocator.fit(
+                    assembledPrompt, context.userMessage(), sourceHistory, priorToolMessages);
+            if (budgeted.rejected()) {
+                throw new ContextBudgetExceededException(budgeted.usedTokens(), budgeted.limit());
+            }
+            // 构建真正发送给模型的预算后消息列表
             List<Message> messages = new ArrayList<>();
             
             // 1. System Message（来自 PromptAssembler，含 Memory、Knowledge 等 section）
-            messages.add(new SystemMessage(assembledPrompt.rendered()));
+            messages.add(new SystemMessage(budgeted.system()));
             
             // 2. 历史消息
-            if (trimmedHistory != null) {
-                messages.addAll(trimmedHistory);
-            }
+            messages.addAll(budgeted.history());
             
             // 3. 当前用户消息
             messages.add(new UserMessage(context.userMessage()));
             
             // 4. 工具调用的 Assistant + ToolResponse 消息（来自上一轮）
-            messages.addAll(buildToolMessages(toolCalls, toolMessagePairs));
+            messages.addAll(budgeted.toolMessages());
+            promptRunRecorder.record(context, turn, assembledPrompt, budgeted.system(), messages,
+                    budgeted.usedTokens(), budgeted.grants());
+            snapshots.capture(context.requestId(), turn, context, assembledPrompt, messages,
+                    budgeted.usedTokens(), budgeted.grants());
             
             // 弹性调用 LLM（超时 + 重试 + 熔断）
             Prompt prompt = new Prompt(messages);
             ChatResponse chatResponse = resilientLlmCall(prompt, context.requestId(), turn);
-            
+
             if (chatResponse == null) {
+                promptRunRecorder.markCall(context.requestId(), turn, "FAILED");
                 // 所有重试耗尽或不可恢复错误，降级返回
                 long latencyMs = System.currentTimeMillis() - startTime;
                 AgentResponse fallback = buildFallbackResponse(
@@ -204,7 +224,8 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                         context.requestId(), turn);
                 return fallback;
             }
-            
+            promptRunRecorder.markCall(context.requestId(), turn, "COMPLETED");
+
             Generation generation = chatResponse.getResult();
             AssistantMessage assistantMessage = generation.getOutput();
             
@@ -213,6 +234,11 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                 // 有工具调用，执行工具
                 for (var toolCall : assistantMessage.getToolCalls()) {
                     log.info("[{}] Tool call: {}({})", context.requestId(), toolCall.name(), toolCall.arguments());
+                    String safetyReject = checkPromptSafetyAllowed(toolCall.name(), context);
+                    if (safetyReject != null) {
+                        toolCalls.add(new AgentResponse.ToolCallInfo(toolCall.name(), toolCall.arguments(), safetyReject));
+                        continue;
+                    }
                     
                     // 检查工具是否在 Profile 允许列表中
                     if (!profile.enabledToolNames().contains(toolCall.name())) {
@@ -223,6 +249,11 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                                 toolCall.arguments(),
                                 "Error: Tool " + toolCall.name() + " is not available for this profile."
                         ));
+                        continue;
+                    }
+                    String requestPolicyReject = checkRequestToolAllowed(toolCall.name(), context);
+                    if (requestPolicyReject != null) {
+                        toolCalls.add(new AgentResponse.ToolCallInfo(toolCall.name(), toolCall.arguments(), requestPolicyReject));
                         continue;
                     }
                     
@@ -240,14 +271,8 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                     }
                     
                     // 执行工具（带 Profile 风险评估）
-                    ToolResult toolResult = toolExecutor.execute(
-                            toolCall.name(),
-                            toolCall.arguments(),
-                            context.requestId(),
-                            context.traceId(),
-                            turn,
-                            profile
-                    );
+                    ToolResult toolResult = executeTool(toolCall.name(), toolCall.arguments(), context, turn, profile);
+                    persistToolEvents(context, toolCall.id(), toolCall.name(), toolCall.arguments(), toolResult);
                     
                     // 记录工具调用信息
                     toolCalls.add(new AgentResponse.ToolCallInfo(
@@ -310,7 +335,9 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                 profile.code().name(),
                 response,
                 context.chatId(),
-                context.userMessage()
+                context.userMessage(),
+                contextUserId(context),
+                memoryWriteEnabled(context)
         ));
         
         return response;
@@ -335,10 +362,7 @@ public class ToolUseLoopRuntime implements AgentRuntime {
         AgentProfile profile = context.profile();
         log.info("[{}] ToolUseLoopRuntime streaming for profile={}", context.requestId(), profile.code());
         
-        List<Message> trimmedHistory = null;
-        if (context.history() != null) {
-            trimmedHistory = trimHistory(context.history(), resolveMaxHistory(context));
-        }
+        List<Message> sourceHistory = context.history() == null ? List.of() : context.history();
         
         List<AgentResponse.ToolCallInfo> toolCalls = new ArrayList<>();
         List<ToolResult> accumulatedToolResults = new ArrayList<>();
@@ -353,21 +377,28 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                 
                 AgentContext loopContext = buildLoopContext(context, accumulatedToolResults);
                 AssembledPrompt assembledPrompt = promptAssembler.assemble(profile, loopContext);
-                promptRunRecorder.record(context.requestId(), profile.code().name(), turn, assembledPrompt);
-                
-                List<Message> messages = new ArrayList<>();
-                messages.add(new SystemMessage(assembledPrompt.rendered()));
-                if (trimmedHistory != null) {
-                    messages.addAll(trimmedHistory);
+                List<Message> priorToolMessages = buildToolMessages(toolCalls, toolMessagePairs);
+                ContextBudgetAllocator.BudgetedContext budgeted = contextBudgetAllocator.fit(
+                        assembledPrompt, context.userMessage(), sourceHistory, priorToolMessages);
+                if (budgeted.rejected()) {
+                    throw new ContextBudgetExceededException(budgeted.usedTokens(), budgeted.limit());
                 }
+                List<Message> messages = new ArrayList<>();
+                messages.add(new SystemMessage(budgeted.system()));
+                messages.addAll(budgeted.history());
                 messages.add(new UserMessage(context.userMessage()));
-                messages.addAll(buildToolMessages(toolCalls, toolMessagePairs));
+                messages.addAll(budgeted.toolMessages());
+                promptRunRecorder.record(context, turn, assembledPrompt, budgeted.system(), messages,
+                        budgeted.usedTokens(), budgeted.grants());
+                snapshots.capture(context.requestId(), turn, context, assembledPrompt, messages,
+                        budgeted.usedTokens(), budgeted.grants());
                 
                 // 弹性流式调用 LLM（超时 + 熔断）
                 Prompt prompt = new Prompt(messages);
                 Flux<ChatResponse> responseFlux = resilientStreamCall(prompt, context.requestId(), turn);
                 
                 if (responseFlux == null) {
+                    promptRunRecorder.markCall(context.requestId(), turn, "FAILED");
                     // 降级：发送错误 token 并结束
                     String fallbackMsg = "抱歉，AI 服务暂时不可用，请稍后再试。";
                     log.warn("[{}] Stream LLM call failed at turn {}, returning fallback",
@@ -422,6 +453,8 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                         }
                     }
                 }).blockLast();
+                promptRunRecorder.markCall(context.requestId(), turn,
+                        textBuilder.isEmpty() && !hasToolCall[0] ? "EMPTY" : "COMPLETED");
                 
                 // 刷新最后一个未完成的工具调用
                 if (hasToolCall[0]) {
@@ -454,6 +487,16 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                             ));
                             continue;
                         }
+                        String requestPolicyReject = checkRequestToolAllowed(toolCall.name(), context);
+                        if (requestPolicyReject != null) {
+                            toolCalls.add(new AgentResponse.ToolCallInfo(toolCall.name(), toolCall.arguments(), requestPolicyReject));
+                            continue;
+                        }
+                        String safetyReject = checkPromptSafetyAllowed(toolCall.name(), context);
+                        if (safetyReject != null) {
+                            toolCalls.add(new AgentResponse.ToolCallInfo(toolCall.name(), toolCall.arguments(), safetyReject));
+                            continue;
+                        }
                         
                         // 检查 runMode 是否允许该工具执行
                         String runModeReject = checkRunModeAllowed(toolCall.name(), context);
@@ -466,10 +509,8 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                             continue;
                         }
                         
-                        ToolResult toolResult = toolExecutor.execute(
-                                toolCall.name(), toolCall.arguments(),
-                                context.requestId(), context.traceId(), turn, profile
-                        );
+                        ToolResult toolResult = executeTool(toolCall.name(), toolCall.arguments(), context, turn, profile);
+                        persistToolEvents(context, toolCall.id(), toolCall.name(), toolCall.arguments(), toolResult);
                         
                         toolCalls.add(new AgentResponse.ToolCallInfo(
                                 toolCall.name(), toolCall.arguments(), toolResult.content()
@@ -531,7 +572,17 @@ public class ToolUseLoopRuntime implements AgentRuntime {
             }
             
             long latencyMs = System.currentTimeMillis() - startTime;
-            
+
+            // Persist before emitting done so an immediate history refresh observes the answer.
+            try {
+                conversationEvents.completeTurn(context.chatId(), context.requestId(), finalAnswer,
+                        Map.of("traceId", context.traceId() == null ? "" : context.traceId(),
+                                "latencyMs", latencyMs));
+                snapshots.completeByRequest(context.requestId(), "COMPLETED", null);
+            } catch (Exception persistenceError) {
+                throw new IllegalStateException("Unable to persist streaming response", persistenceError);
+            }
+
             // 发送完成事件
             try {
                 emitter.send(SseEmitter.event()
@@ -552,9 +603,6 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                 }
             }
 
-            // 流式请求也必须持久化，否则下一轮无法带上历史上下文。
-            saveStreamMessages(context, finalAnswer);
-            
             // 发布事件
             AgentResponse response = AgentResponse.builder()
                     .requestId(context.requestId())
@@ -567,7 +615,8 @@ public class ToolUseLoopRuntime implements AgentRuntime {
             eventPublisher.publishEvent(new AgentRunCompletedEvent(
                     this, context.requestId(), context.traceId(),
                     profile.code().name(), response,
-                    context.chatId(), context.userMessage()
+                    context.chatId(), context.userMessage(),
+                    contextUserId(context), memoryWriteEnabled(context)
             ));
             
         } catch (SseIOException e) {
@@ -578,10 +627,12 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                 log.warn("[{}] SSE send error: {}", context.requestId(), cause.getMessage());
             }
             try { emitter.complete(); } catch (RuntimeException ignore) { }
+            failStreamTurn(context, "CANCELLED", "CLIENT_ABORT");
         } catch (Exception e) {
             if (ClientAbortDetector.isClientAbort(e)) {
                 log.info("[{}] SSE client disconnected", context.requestId());
                 try { emitter.complete(); } catch (RuntimeException ignore) { }
+                failStreamTurn(context, "CANCELLED", "CLIENT_ABORT");
                 return;
             }
             log.error("[{}] Stream execution error", context.requestId(), e);
@@ -597,22 +648,9 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                     emitter.completeWithError(ex);
                 }
             }
-        }
-    }
-
-    private void saveStreamMessages(AgentContext context, String answer) {
-        if (context.chatId() == null || context.chatId().isBlank()) {
-            return;
-        }
-        try {
-            List<Message> messages = new ArrayList<>();
-            messages.add(new UserMessage(context.userMessage()));
-            if (answer != null && !answer.isBlank()) {
-                messages.add(new AssistantMessage(answer));
-            }
-            chatMemory.add(context.chatId(), messages);
-        } catch (Exception e) {
-            log.warn("[{}] Failed to save streaming chat memory: {}", context.requestId(), e.getMessage());
+            failStreamTurn(context,
+                    e instanceof ContextBudgetExceededException ? "REJECTED_TOO_LONG" : "FAILED",
+                    e.getClass().getSimpleName());
         }
     }
     
@@ -642,8 +680,16 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                 if (context.planId() == null || context.planId().isEmpty()) {
                     return "当前处于执行模式，但未关联计划 ID，请先创建并批准计划。";
                 }
-                if (!planReviewService.isPlanApproved(context.planId())) {
+                Long userId = context.metadata() != null && context.metadata().get("userId") instanceof Number n ? n.longValue() : null;
+                if (userId == null || !planReviewService.isPlanApproved(userId, context.chatId(), context.planId())) {
                     return "计划 " + context.planId() + " 尚未获得批准，无法在执行模式下运行。";
+                }
+                boolean toolInPlan = planReviewService.getPlan(userId, context.planId())
+                    .map(plan -> plan.steps().stream().map(com.sxw.sxwaiagent.plan.Plan.PlanStep::toolName)
+                        .filter(java.util.Objects::nonNull).anyMatch(toolName::equals))
+                    .orElse(false);
+                if (!toolInPlan) {
+                    return "This tool is not part of the approved plan.";
                 }
                 return null;
                 
@@ -652,6 +698,44 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                 // CHAT 模式：正常执行，无额外限制
                 return null;
         }
+    }
+
+    private String checkPromptSafetyAllowed(String toolName, AgentContext context) {
+        Object value = context.metadata() == null ? null : context.metadata().get("promptSafety");
+        if (!(value instanceof PromptSafetyDecision decision) || !decision.blockDangerousTools()) return null;
+        ToolDefinition definition = toolRegistry.get(toolName).orElse(null);
+        if (definition != null && definition.riskLevel().ordinal() >= com.sxw.sxwaiagent.agent.profile.ToolRiskLevel.EXTERNAL_WRITE.ordinal()) {
+            return "Tool blocked because the current request has a prompt-injection safety signal.";
+        }
+        return null;
+    }
+
+    private ToolResult executeTool(String toolName, String arguments, AgentContext context, int turn, AgentProfile profile) {
+        PromptSafetyDecision decision = context.metadata() != null && context.metadata().get("promptSafety") instanceof PromptSafetyDecision value ? value : null;
+        return decision == null
+            ? toolExecutor.execute(toolName, arguments, context.requestId(), context.traceId(), turn, profile)
+            : toolExecutor.execute(toolName, arguments, context.requestId(), context.traceId(), turn, profile, decision);
+    }
+
+    /** Applies request-scoped controls again immediately before a tool is used. */
+    private String checkRequestToolAllowed(String toolName, AgentContext context) {
+        Map<String, Object> metadata = context.metadata() == null ? Map.of() : context.metadata();
+        Object selected = metadata.get("enabledTools");
+        if (selected instanceof Collection<?> collection && !collection.isEmpty()) {
+            Set<String> whitelist = new HashSet<>();
+            collection.forEach(item -> { if (item != null) whitelist.add(String.valueOf(item)); });
+            if (!whitelist.contains(toolName)) {
+                return "This tool was not selected for the current request.";
+            }
+        }
+        boolean networkTool = "searchWeb".equals(toolName) || "scrapeWebPage".equals(toolName);
+        if (networkTool && !Boolean.TRUE.equals(metadata.get("webSearchEnabled"))) {
+            return "Web search is disabled for the current request.";
+        }
+        if (networkTool && (searchApiKey == null || searchApiKey.isBlank())) {
+            return "Web search is not configured by the server.";
+        }
+        return null;
     }
     
     /**
@@ -800,7 +884,9 @@ public class ToolUseLoopRuntime implements AgentRuntime {
                 profile.code().name(),
                 response,
                 context.chatId(),
-                context.userMessage()
+                context.userMessage(),
+                contextUserId(context),
+                memoryWriteEnabled(context)
         ));
         
         return response;
@@ -875,40 +961,43 @@ public class ToolUseLoopRuntime implements AgentRuntime {
         // 此处无需重复添加 ToolResponseMessage，避免信息冗余。
         return List.of();
     }
-    
-    /**
-     * 从 Profile 的 MemoryPolicy 读取历史消息上限，未配置时使用默认值。
-     */
-    private int resolveMaxHistory(AgentContext context) {
-        if (context.profile() != null && context.profile().memoryPolicy() != null) {
-            return context.profile().memoryPolicy().maxHistoryMessages();
+
+    private void persistToolEvents(AgentContext context, String toolCallId, String toolName,
+                                   String arguments, ToolResult result) {
+        if (context.chatId() == null || context.chatId().isBlank()) return;
+        try {
+            String turnId = "turn_" + context.requestId();
+            Map<String, Object> callMetadata = new HashMap<>();
+            callMetadata.put("toolCallId", toolCallId == null ? "" : toolCallId);
+            callMetadata.put("toolName", toolName == null ? "" : toolName);
+            conversationEvents.appendTool(context.chatId(), turnId, context.requestId(), "ASSISTANT",
+                    "TOOL_CALL", toolCallId, toolName, arguments == null ? "{}" : arguments, callMetadata);
+            Map<String, Object> resultMetadata = new HashMap<>(callMetadata);
+            resultMetadata.put("success", result != null && result.success());
+            conversationEvents.appendTool(context.chatId(), turnId, context.requestId(), "TOOL",
+                    "TOOL_RESULT", toolCallId, toolName,
+                    result == null || result.content() == null ? "" : result.content(), resultMetadata);
+        } catch (Exception e) {
+            log.error("[{}] Failed to persist tool events: {}", context.requestId(), e.getMessage());
         }
-        return DEFAULT_HISTORY_MESSAGES;
     }
 
-    /**
-     * 裁剪历史消息，保留最近的 N 条消息，防止 context 溢出
-     * <p>
-     * 策略：保留最近的 N 条 User/Assistant 消息对，确保对话完整性
-     */
-    private List<Message> trimHistory(List<Message> history, int maxMessages) {
-        if (history.size() <= maxMessages) {
-            return history;
+    private void failStreamTurn(AgentContext context, String status, String category) {
+        try {
+            conversationEvents.failTurn(context.chatId(), context.requestId(), status, category);
+            snapshots.completeByRequest(context.requestId(), "FAILED", category);
+        } catch (Exception persistenceError) {
+            log.error("[{}] Failed to persist stream failure: {}", context.requestId(), persistenceError.getMessage());
         }
-        
-        // 从末尾开始保留，确保 User/Assistant 配对完整
-        List<Message> result = new ArrayList<>();
-        int count = 0;
-        
-        for (int i = history.size() - 1; i >= 0 && count < maxMessages; i--) {
-            result.add(0, history.get(i));
-            count++;
-        }
-        
-        if (history.size() > maxMessages) {
-            log.warn("Trimmed history from {} to {} messages", history.size(), result.size());
-        }
-        
-        return result;
     }
+
+    private Long contextUserId(AgentContext context) {
+        Object value = context.metadata() == null ? null : context.metadata().get("userId");
+        return value instanceof Number number ? number.longValue() : null;
+    }
+
+    private boolean memoryWriteEnabled(AgentContext context) {
+        return context.metadata() == null || !Boolean.FALSE.equals(context.metadata().get("memoryWriteEnabled"));
+    }
+    
 }

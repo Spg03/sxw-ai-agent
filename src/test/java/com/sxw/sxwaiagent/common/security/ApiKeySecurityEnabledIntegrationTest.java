@@ -43,8 +43,16 @@ class ApiKeySecurityEnabledIntegrationTest {
 
     @Test
     void protectedEndpointsAllowRequestsWithCorrectApiKey() throws Exception {
+        var user = new com.sxw.sxwaiagent.auth.AuthenticatedUser(1L, "admin", "Admin", "ADMIN");
+        var auth = new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(user, "", user.getAuthorities());
         mockMvc.perform(get("/api/agent/traces/chat-a")
+                        .principal(auth)
                         .header(ApiKeyInterceptor.HEADER_NAME, "test-secret"))
                 .andExpect(status().isOk());
+    }
+
+    @Test void apiKeyAloneDoesNotAuthorizePrivateTraces() throws Exception {
+        mockMvc.perform(get("/api/agent/traces/chat-a").header(ApiKeyInterceptor.HEADER_NAME, "test-secret"))
+                .andExpect(status().isForbidden());
     }
 }

@@ -15,6 +15,8 @@ public class AgentRunCompletedEvent extends ApplicationEvent {
     private final AgentResponse response;
     private final String chatId;
     private final String userMessage;
+    private final Long userId;
+    private final boolean memoryWriteEnabled;
     
     /**
      * 完整构造器
@@ -22,6 +24,13 @@ public class AgentRunCompletedEvent extends ApplicationEvent {
     public AgentRunCompletedEvent(Object source, String requestId, String traceId,
                                   String profileCode, AgentResponse response,
                                   String chatId, String userMessage) {
+        this(source, requestId, traceId, profileCode, response, chatId, userMessage, null, true);
+    }
+
+    public AgentRunCompletedEvent(Object source, String requestId, String traceId,
+                                  String profileCode, AgentResponse response,
+                                  String chatId, String userMessage, Long userId,
+                                  boolean memoryWriteEnabled) {
         super(source);
         this.requestId = requestId;
         this.traceId = traceId;
@@ -29,6 +38,8 @@ public class AgentRunCompletedEvent extends ApplicationEvent {
         this.response = response;
         this.chatId = chatId;
         this.userMessage = userMessage;
+        this.userId = userId;
+        this.memoryWriteEnabled = memoryWriteEnabled;
     }
     
     /**
@@ -62,4 +73,8 @@ public class AgentRunCompletedEvent extends ApplicationEvent {
     public String getUserMessage() {
         return userMessage;
     }
+
+    public Long getUserId() { return userId; }
+
+    public boolean isMemoryWriteEnabled() { return memoryWriteEnabled; }
 }

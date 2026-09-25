@@ -33,6 +33,7 @@ class EvalServiceTest {
     @BeforeEach
     void setUp() {
         evalService = new EvalService(evalCaseRepository, evalRunRepository, evalResultRepository, evalExecutor);
+        lenient().when(evalRunRepository.claim(anyString())).thenReturn(true);
     }
 
     // ── Case Management ─────────────────────────────────────────────
@@ -71,6 +72,7 @@ class EvalServiceTest {
         @Test
         @DisplayName("activateCase 更新状态为 ACTIVE")
         void activateCaseUpdatesStatus() {
+            when(evalCaseRepository.findByCaseId("eval-123")).thenReturn(Optional.of(activeCase("eval-123")));
             evalService.activateCase("eval-123");
             verify(evalCaseRepository).updateStatus("eval-123", EvalCaseStatus.ACTIVE);
         }
@@ -118,6 +120,7 @@ class EvalServiceTest {
         @Test
         @DisplayName("createRun 生成 runId 并持久化")
         void createRunGeneratesIdAndSaves() {
+            when(evalCaseRepository.findByIds(List.of("c1", "c2"))).thenReturn(List.of(activeCase("c1"), activeCase("c2")));
             EvalRun run = evalService.createRun("测试运行", "GENERAL", List.of("c1", "c2"), "api");
 
             assertNotNull(run);
@@ -161,7 +164,7 @@ class EvalServiceTest {
 
             evalService.executeRun("run-ok");
 
-            verify(evalRunRepository).updateStatus("run-ok", EvalRunStatus.RUNNING);
+            verify(evalRunRepository).claim("run-ok");
             verify(evalResultRepository).saveBatch(eq("run-ok"), anyList());
             verify(evalRunRepository).updateResults(eq("run-ok"), eq(EvalRunStatus.COMPLETED),
                 eq(1), eq(1), eq(0), eq(50.0), anyLong());
@@ -196,6 +199,26 @@ class EvalServiceTest {
     }
 
     // ── Query ───────────────────────────────────────────────────────
+
+    private static EvalCase activeCase(String id) {
+        return new EvalCase(null, id, "case", EvalCaseType.CONVERSATION, EvalCaseStatus.ACTIVE,
+                "GENERAL", "input", "expected", null, null, ValidationMode.KEYWORD_ONLY,
+                null, 5, "admin", java.time.LocalDateTime.now(), java.time.LocalDateTime.now());
+    }
+
+    @Test void rejectsDraftCasesBeforeEnqueueing() {
+        when(evalCaseRepository.findByIds(List.of("draft"))).thenReturn(List.of(new EvalCase(
+                "draft", "Draft", EvalCaseType.CONVERSATION, "GENERAL", "in", "out")));
+        assertThrows(IllegalArgumentException.class, () -> evalService.createRun("run", "GENERAL", List.of("draft"), "admin"));
+        verify(evalRunRepository, never()).save(any());
+    }
+
+    @Test void losingWorkerDoesNotInvokeModel() {
+        when(evalRunRepository.findByRunId("run")).thenReturn(Optional.of(new EvalRun("run", "name", "GENERAL", List.of("c"), "admin")));
+        when(evalRunRepository.claim("run")).thenReturn(false);
+        evalService.executeRun("run");
+        verifyNoInteractions(evalExecutor);
+    }
 
     @Nested
     @DisplayName("查询")

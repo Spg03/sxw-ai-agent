@@ -120,7 +120,8 @@ public class MemoryService {
      * 仅 HermesApplier 在候选 APPROVED 后调用。直接创建 ACTIVE 记忆。
      */
     public MemoryItem upsert(HermesCandidate candidate) {
-        String memoryId = "mem-" + UUID.randomUUID().toString().substring(0, 8);
+        String memoryId = "mem-" + UUID.nameUUIDFromBytes(candidate.candidateId()
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
         MemoryItem item = new MemoryItem(
                 null,

@@ -17,6 +17,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import com.sxw.sxwaiagent.auth.AuthenticatedUser;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.access.AccessDeniedException;
 
 @Tag(name = "Agent 追踪", description = "Agent 执行追踪记录查询")
 @RestController
@@ -33,26 +36,45 @@ public class AgentTraceController {
     @Operation(summary = "列出所有追踪记录", description = "按时间倒序返回最近的 Agent 执行追踪")
     @GetMapping
     public Result<List<AgentTraceRun>> listAllTraces(
+            Authentication authentication,
             @RequestParam(defaultValue = "50") @Min(1) @Max(100) int limit) {
-        return Result.ok(agentTraceStore.findAllRecent(limit));
+        AuthenticatedUser user = user(authentication);
+        return Result.ok(isAdmin(user) ? agentTraceStore.findAllRecent(limit)
+                : agentTraceStore.findForUser(user.userId(), null, null, limit));
     }
 
     @Operation(summary = "查询指定会话的追踪", description = "根据会话 ID 返回最近的执行记录")
     @GetMapping("/{id}")
     public Result<List<AgentTraceRun>> recentRuns(
+            Authentication authentication,
             @PathVariable @NotBlank @Size(max = 64) String id,
             @RequestParam(defaultValue = "5") @Min(1) @Max(20) int limit) {
-        return Result.ok(agentTraceStore.recentRuns(id, limit));
+        AuthenticatedUser user = user(authentication);
+        return Result.ok(isAdmin(user) ? agentTraceStore.recentRuns(id, limit)
+                : agentTraceStore.findForUser(user.userId(), id, null, limit));
     }
 
     @Operation(summary = "根据 traceId 查询", description = "精确查找单次执行的追踪详情")
     @GetMapping("/trace/{traceId}")
     public Result<AgentTraceRun> getByTraceId(
+            Authentication authentication,
             @PathVariable @NotBlank @Size(max = 64) String traceId) {
-        List<AgentTraceRun> runs = agentTraceStore.findByTraceId(traceId);
+        AuthenticatedUser user = user(authentication);
+        List<AgentTraceRun> runs = isAdmin(user) ? agentTraceStore.findByTraceId(traceId)
+                : agentTraceStore.findForUser(user.userId(), null, traceId, 1);
         if (runs.isEmpty()) {
             return Result.ok(null);
         }
         return Result.ok(runs.get(0));
     }
+
+    private AuthenticatedUser user(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()
+                || !(authentication.getPrincipal() instanceof AuthenticatedUser user)) {
+            throw new AccessDeniedException("Authentication required");
+        }
+        return user;
+    }
+
+    private boolean isAdmin(AuthenticatedUser user) { return "ADMIN".equals(user.role()); }
 }

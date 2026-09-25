@@ -4,6 +4,7 @@ import com.sxw.sxwaiagent.knowledge.DocumentIngestService;
 import com.sxw.sxwaiagent.knowledge.IngestStatus;
 import com.sxw.sxwaiagent.knowledge.KnowledgeRepository;
 import com.sxw.sxwaiagent.knowledge.KnowledgeRetrievalService;
+import com.sxw.sxwaiagent.auth.AuthenticatedUser;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,12 +13,15 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -41,28 +45,29 @@ class KnowledgeControllerTest {
     @DisplayName("POST /api/knowledge/documents 上传成功返回 docId")
     void uploadDocumentSuccess() throws Exception {
         var result = new DocumentIngestService.IngestResult("doc-123", 5, "OK", IngestStatus.CREATED);
-        when(ingestService.ingestFromFile(any(), anyBoolean(), any())).thenReturn(result);
+        when(ingestService.ingest(anyLong(), anyString(), anyString(), anyString(), anyBoolean(), any())).thenReturn(result);
 
         MockMultipartFile file = new MockMultipartFile(
             "file", "test.md", MediaType.TEXT_PLAIN_VALUE, "# Hello".getBytes());
 
-        mockMvc.perform(multipart("/api/knowledge/documents").file(file))
+        mockMvc.perform(multipart("/api/knowledge/documents").file(file).principal(testAuthentication()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(0))
             .andExpect(jsonPath("$.data.docId").value("doc-123"))
             .andExpect(jsonPath("$.data.chunkCount").value(5));
+        verify(ingestService).ingest(eq(1L), eq("test.md"), eq("upload:test.md"), eq("# Hello"), eq(false), any());
     }
 
     @Test
     @DisplayName("POST /api/knowledge/documents 上传失败返回错误")
     void uploadDocumentFailure() throws Exception {
         var result = new DocumentIngestService.IngestResult(null, 0, "文件为空", null);
-        when(ingestService.ingestFromFile(any(), anyBoolean(), any())).thenReturn(result);
+        when(ingestService.ingest(anyLong(), anyString(), anyString(), anyString(), anyBoolean(), any())).thenReturn(result);
 
         MockMultipartFile file = new MockMultipartFile(
             "file", "empty.md", MediaType.TEXT_PLAIN_VALUE, "".getBytes());
 
-        mockMvc.perform(multipart("/api/knowledge/documents").file(file))
+        mockMvc.perform(multipart("/api/knowledge/documents").file(file).principal(testAuthentication()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(500));
     }
@@ -73,10 +78,11 @@ class KnowledgeControllerTest {
     @DisplayName("POST /api/knowledge/documents/text 文本入库成功")
     void ingestTextSuccess() throws Exception {
         var result = new DocumentIngestService.IngestResult("doc-txt", 3, "OK", IngestStatus.CREATED);
-        when(ingestService.ingest(anyString(), anyString(), anyString(), anyBoolean(), any()))
+        when(ingestService.ingest(anyLong(), anyString(), anyString(), anyString(), anyBoolean(), any()))
             .thenReturn(result);
 
         mockMvc.perform(post("/api/knowledge/documents/text")
+                .principal(testAuthentication())
                 .param("title", "测试文档")
                 .contentType(MediaType.TEXT_PLAIN)
                 .content("这是测试内容"))
@@ -95,9 +101,9 @@ class KnowledgeControllerTest {
             new KnowledgeRepository.KnowledgeDocumentRecord(
                 "doc-2", "文档B", "/path/b.md", 5, "ACTIVE", "hash2", "fp2", Instant.now())
         );
-        when(ingestService.listDocuments()).thenReturn(docs);
+        when(ingestService.listDocuments(anyLong())).thenReturn(docs);
 
-        mockMvc.perform(get("/api/knowledge/documents"))
+        mockMvc.perform(get("/api/knowledge/documents").principal(testAuthentication()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.length()").value(2))
             .andExpect(jsonPath("$.data[0].docId").value("doc-1"));
@@ -108,7 +114,7 @@ class KnowledgeControllerTest {
     @Test
     @DisplayName("DELETE /api/knowledge/documents/{docId} 删除成功")
     void deleteDocument() throws Exception {
-        mockMvc.perform(delete("/api/knowledge/documents/doc-del"))
+        mockMvc.perform(delete("/api/knowledge/documents/doc-del").principal(testAuthentication()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(0));
     }
@@ -119,9 +125,10 @@ class KnowledgeControllerTest {
     @DisplayName("PUT /api/knowledge/documents/{docId}/content 重新索引成功")
     void reindexDocumentSuccess() throws Exception {
         var result = new DocumentIngestService.IngestResult("doc-re", 8, "OK", IngestStatus.REINDEXED);
-        when(ingestService.reindex(eq("doc-re"), anyString(), any())).thenReturn(result);
+        when(ingestService.reindex(anyLong(), eq("doc-re"), anyString(), any())).thenReturn(result);
 
         mockMvc.perform(put("/api/knowledge/documents/doc-re/content")
+                .principal(testAuthentication())
                 .contentType(MediaType.TEXT_PLAIN)
                 .content("新内容"))
             .andExpect(status().isOk())
@@ -131,13 +138,19 @@ class KnowledgeControllerTest {
     @Test
     @DisplayName("PUT /api/knowledge/documents/{docId}/content 文档不存在返回错误")
     void reindexDocumentNotFound() throws Exception {
-        when(ingestService.reindex(eq("nope"), anyString(), any()))
+        when(ingestService.reindex(anyLong(), eq("nope"), anyString(), any()))
             .thenThrow(new IllegalArgumentException("Document not found: nope"));
 
         mockMvc.perform(put("/api/knowledge/documents/nope/content")
+                .principal(testAuthentication())
                 .contentType(MediaType.TEXT_PLAIN)
                 .content("content"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(500));
+    }
+
+    private static Authentication testAuthentication() {
+        return new UsernamePasswordAuthenticationToken(
+            new AuthenticatedUser(1L, "admin", "Admin", "USER"), "N/A", List.of());
     }
 }

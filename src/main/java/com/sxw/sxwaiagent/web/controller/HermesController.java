@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Optional;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.access.AccessDeniedException;
 
 @Tag(name = "Hermes 审核", description = "Hermes 学习候选的查询、审批与拒绝")
 @RestController
@@ -30,14 +32,16 @@ public class HermesController {
     
     @Operation(summary = "获取待审核候选列表")
     @GetMapping
-    public Result<List<HermesCandidate>> getPendingCandidates() {
+    public Result<List<HermesCandidate>> getPendingCandidates(Authentication authentication) {
+        reviewer(authentication);
         List<HermesCandidate> candidates = candidateService.getPendingCandidates();
         return Result.ok(candidates);
     }
     
     @Operation(summary = "获取单个候选详情")
     @GetMapping("/{candidateId}")
-    public Result<HermesCandidate> getCandidate(@PathVariable String candidateId) {
+    public Result<HermesCandidate> getCandidate(@PathVariable String candidateId, Authentication authentication) {
+        reviewer(authentication);
         Optional<HermesCandidate> candidate = candidateService.getCandidate(candidateId);
         return candidate.map(Result::ok).orElse(Result.error("Candidate not found"));
     }
@@ -46,8 +50,9 @@ public class HermesController {
     @PostMapping("/{candidateId}/approve")
     public Result<String> approveCandidate(
         @PathVariable String candidateId,
-        @RequestParam @NotBlank String reviewedBy
+        Authentication authentication
     ) {
+        String reviewedBy = reviewer(authentication);
         log.info("Approving candidate {} by {}", candidateId, reviewedBy);
         
         boolean success = candidateService.approveCandidate(candidateId, reviewedBy);
@@ -63,8 +68,9 @@ public class HermesController {
     @PostMapping("/{candidateId}/reject")
     public Result<String> rejectCandidate(
         @PathVariable String candidateId,
-        @RequestParam @NotBlank String reviewedBy
+        Authentication authentication
     ) {
+        String reviewedBy = reviewer(authentication);
         log.info("Rejecting candidate {} by {}", candidateId, reviewedBy);
         
         boolean success = candidateService.rejectCandidate(candidateId, reviewedBy);
@@ -80,8 +86,9 @@ public class HermesController {
     @PostMapping("/{candidateId}/retry")
     public Result<String> retryApply(
         @PathVariable String candidateId,
-        @RequestParam @NotBlank String reviewedBy
+        Authentication authentication
     ) {
+        String reviewedBy = reviewer(authentication);
         log.info("Retrying apply for candidate {} by {}", candidateId, reviewedBy);
         
         boolean success = candidateService.retryApply(candidateId, reviewedBy);
@@ -95,8 +102,17 @@ public class HermesController {
     
     @Operation(summary = "获取应用失败候选列表")
     @GetMapping("/failed")
-    public Result<List<HermesCandidate>> getFailedCandidates() {
+    public Result<List<HermesCandidate>> getFailedCandidates(Authentication authentication) {
+        reviewer(authentication);
         List<HermesCandidate> candidates = candidateService.getFailedCandidates();
         return Result.ok(candidates);
+    }
+
+    private String reviewer(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()
+                || authentication.getAuthorities().stream().noneMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()))) {
+            throw new AccessDeniedException("Hermes review requires ADMIN");
+        }
+        return authentication.getName();
     }
 }

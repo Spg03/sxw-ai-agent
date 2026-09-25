@@ -77,11 +77,39 @@ search-api:
   api-key: ${SEARCH_API_KEY:}
 # 业务自定义：技能 / 工具安全沙箱 / 缓存配置
 sxw:
+  eval:
+    model: ${SXW_EVAL_MODEL:deepseek-chat}
+    max-output-tokens: ${SXW_EVAL_MAX_OUTPUT_TOKENS:4096}
+    repeats: ${SXW_EVAL_REPEATS:3}
+    deepseek-base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    deepseek-api-key: ${DEEPSEEK_API_KEY:}
+    worker-delay-ms: ${SXW_EVAL_WORKER_DELAY_MS:2000}
+    dsh:
+      enabled: ${SXW_EVAL_DSH_ENABLED:false}
+      image: ${SXW_EVAL_DSH_IMAGE:agentforge/dsh-eval:99f6f02}
+      commit: ${SXW_EVAL_DSH_COMMIT:99f6f02}
+      case-timeout-seconds: ${SXW_EVAL_DSH_CASE_TIMEOUT_SECONDS:180}
+      run-timeout-minutes: ${SXW_EVAL_DSH_RUN_TIMEOUT_MINUTES:30}
+      docker-command: ${SXW_EVAL_DSH_DOCKER_COMMAND:docker}
+      provider: ${SXW_EVAL_DSH_PROVIDER:deepseek-official}
+      event-log-bucket: ${SXW_EVAL_DSH_EVENT_LOG_BUCKET:sxw-eval-events}
   security:
     api-key:
       enabled: ${SXW_SECURITY_API_KEY_ENABLED:false}
       value: ${SXW_SECURITY_API_KEY:}
   agent:
+    conversation-v3-enabled: ${SXW_AGENT_CONVERSATION_V3_ENABLED:true}
+    prompt:
+      # Bump deliberately whenever a trusted static Prompt section changes.
+      active-version: ${SXW_AGENT_PROMPT_ACTIVE_VERSION:2}
+    security:
+      prompt-injection:
+        enabled: ${AGENT_PROMPT_INJECTION_ENABLED:true}
+        rule-detector-enabled: ${AGENT_PROMPT_INJECTION_RULES_ENABLED:true}
+        llm-detector-enabled: ${AGENT_PROMPT_INJECTION_LLM_ENABLED:true}
+        detector-model: ${AGENT_PROMPT_INJECTION_MODEL:qwen-turbo}
+        max-text-chars: ${AGENT_PROMPT_INJECTION_MAX_TEXT_CHARS:6000}
+        enforcement-mode: ${AGENT_PROMPT_INJECTION_MODE:ENFORCE}
     attachment:
       enabled: ${AGENT_ATTACHMENT_ENABLED:true}
       endpoint: ${MINIO_ENDPOINT:http://192.168.26.131:9000}
@@ -99,6 +127,22 @@ sxw:
     context:
       max-input-tokens: ${SXW_AGENT_CONTEXT_MAX_INPUT_TOKENS:8192}
       reserved-output-tokens: ${SXW_AGENT_CONTEXT_RESERVED_OUTPUT_TOKENS:2048}
+    memory:
+      outbox-delay-ms: ${SXW_AGENT_MEMORY_OUTBOX_DELAY_MS:5000}
+      outbox-max-attempts: ${SXW_AGENT_MEMORY_OUTBOX_MAX_ATTEMPTS:5}
+      summary-model: ${SXW_AGENT_MEMORY_SUMMARY_MODEL:qwen-turbo}
+      working-model: ${SXW_AGENT_MEMORY_WORKING_MODEL:qwen-turbo}
+      summary-async-trigger-ratio: ${SXW_AGENT_MEMORY_SUMMARY_ASYNC_RATIO:0.70}
+      summary-sync-trigger-ratio: ${SXW_AGENT_MEMORY_SUMMARY_SYNC_RATIO:0.85}
+      min-unsummarized-turns: ${SXW_AGENT_MEMORY_MIN_UNSUMMARIZED_TURNS:4}
+      min-unsummarized-tokens: ${SXW_AGENT_MEMORY_MIN_UNSUMMARIZED_TOKENS:1500}
+      max-recent-turns: ${SXW_AGENT_MEMORY_MAX_RECENT_TURNS:10}
+      max-recent-events: ${SXW_AGENT_MEMORY_MAX_RECENT_EVENTS:40}
+      embedding-model: ${SXW_AGENT_MEMORY_EMBEDDING_MODEL:text-embedding-v3}
+      embedding-dimension: ${SXW_AGENT_MEMORY_EMBEDDING_DIMENSION:1024}
+      always-on-token-budget: ${SXW_AGENT_MEMORY_ALWAYS_ON_TOKEN_BUDGET:300}
+      relevant-token-budget: ${SXW_AGENT_MEMORY_RELEVANT_TOKEN_BUDGET:500}
+      semantic-threshold: ${SXW_AGENT_MEMORY_SEMANTIC_THRESHOLD:0.45}
   skill:
     note:
       base-dir: ${NOTE_BASE_DIR:${user.dir}/tmp/notes}

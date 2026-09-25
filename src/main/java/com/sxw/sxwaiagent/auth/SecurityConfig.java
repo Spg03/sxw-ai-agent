@@ -69,6 +69,11 @@ public class SecurityConfig {
                         // ─── Actuator 敏感端点：需要 ADMIN 角色 ───
                         // prometheus/env/heapdump/metrics 等仅管理员可访问
                         .requestMatchers("/actuator/**").hasRole("ADMIN")
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        // Legacy Hermes candidates apply to shared stores, so only admins may review them.
+                        .requestMatchers("/api/hermes/**").hasRole("ADMIN")
+                        // 离线评测可调用外部模型并消耗配额，仅管理员或评测员可访问。
+                        .requestMatchers("/api/eval/**").hasAnyRole("ADMIN", "EVALUATOR")
 
                         // ─── 前端 SPA 静态资源 ───
                         .requestMatchers("/", "/index.html", "/favicon.ico", "/favicon.svg", "/assets/**", "/icons.svg").permitAll();

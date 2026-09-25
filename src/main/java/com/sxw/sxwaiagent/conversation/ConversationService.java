@@ -1,7 +1,9 @@
 package com.sxw.sxwaiagent.conversation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sxw.sxwaiagent.attachment.AttachmentService;
 import com.sxw.sxwaiagent.agent.profile.AgentProfileCode;
+import com.sxw.sxwaiagent.memory.UserMemoryService;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -19,11 +21,16 @@ public class ConversationService {
     private final JdbcTemplate jdbc;
     private final StringRedisTemplate redis;
     private final ObjectMapper objectMapper;
+    private final AttachmentService attachments;
+    private final UserMemoryService memories;
 
-    public ConversationService(JdbcTemplate jdbc, StringRedisTemplate redis, ObjectMapper objectMapper) {
+    public ConversationService(JdbcTemplate jdbc, StringRedisTemplate redis, ObjectMapper objectMapper,
+                               AttachmentService attachments, UserMemoryService memories) {
         this.jdbc = jdbc;
         this.redis = redis;
         this.objectMapper = objectMapper;
+        this.attachments = attachments;
+        this.memories = memories;
     }
 
     @Transactional
@@ -52,29 +59,10 @@ public class ConversationService {
 
     public List<ConversationMessage> messages(long userId, String id, int limit) {
         get(userId, id);
-        return jdbc.query("SELECT * FROM (SELECT * FROM ai_conversation_message WHERE conversation_id=? ORDER BY id DESC LIMIT ?) m ORDER BY id",
+        return jdbc.query("SELECT * FROM (SELECT * FROM ai_conversation_message WHERE conversation_id=? "
+                        + "AND message_type IN ('USER','ASSISTANT') ORDER BY sequence_no DESC LIMIT ?) m ORDER BY sequence_no",
                 (rs, n) -> new ConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getTimestamp("created_at").toInstant()),
                 id, Math.min(Math.max(limit, 1), 200));
-    }
-
-    @Transactional
-    public void append(long userId, String id, String role, String content) {
-        get(userId, id);
-        jdbc.update("INSERT INTO ai_conversation_message(conversation_id,role,content) VALUES (?,?,?)", id, role, content);
-        jdbc.update("UPDATE ai_conversation SET updated_at=NOW(), title=CASE WHEN title='New conversation' AND ?='USER' THEN LEFT(?,160) ELSE title END WHERE conversation_id=?",
-                role, content.replaceAll("\\s+", " "), id);
-        cache(userId, id, role, content, 0, Instant.now());
-        refreshSummary(userId, id);
-    }
-
-    @Transactional
-    public void appendAssistant(String id, String content) {
-        Long userId = jdbc.query("SELECT user_id FROM ai_conversation WHERE conversation_id=?", rs -> rs.next() ? rs.getLong(1) : null, id);
-        if (userId == null) return;
-        jdbc.update("INSERT INTO ai_conversation_message(conversation_id,role,content) VALUES (?,?,?)", id, "ASSISTANT", content);
-        jdbc.update("UPDATE ai_conversation SET updated_at=NOW() WHERE conversation_id=?", id);
-        cache(userId, id, "ASSISTANT", content, 0, Instant.now());
-        refreshSummary(userId, id);
     }
 
     public List<ConversationMessage> recentMessages(long userId, String id) {
@@ -99,8 +87,37 @@ public class ConversationService {
         return get(userId, id);
     }
 
-    public void delete(long userId, String id) {
+    public void delete(long userId, String id) { delete(userId, id, false); }
+
+    @Transactional
+    public void delete(long userId, String id, boolean purgeInferredMemories) {
+        get(userId, id);
+        jdbc.queryForList("SELECT user_id FROM ai_conversation WHERE conversation_id=? AND user_id=? FOR UPDATE", Long.class, id, userId);
+        if (purgeInferredMemories) memories.purgeInferredForConversation(userId, id);
+        attachments.deleteConversationAttachments(userId, id);
         if (jdbc.update("DELETE FROM ai_conversation WHERE conversation_id=? AND user_id=?", id, userId) == 0) throw new IllegalArgumentException("Conversation not found");
+        try { redis.delete(cacheKey(userId, id)); } catch (Exception ignored) { }
+    }
+
+    public DeletionPreview deletionPreview(long userId, String id) {
+        get(userId, id);
+        Long messages = jdbc.queryForObject("SELECT count(*) FROM ai_conversation_message WHERE conversation_id=?", Long.class, id);
+        Long attachmentCount = jdbc.queryForObject("SELECT count(*) FROM ai_chat_attachment WHERE user_id=? AND conversation_id=?", Long.class, userId, id);
+        return new DeletionPreview(messages == null ? 0 : messages,
+                attachmentCount == null ? 0 : attachmentCount,
+                memories.inferredCountForConversation(userId, id));
+    }
+
+    @Transactional
+    public void clearMessages(long userId, String id) {
+        get(userId, id);
+        jdbc.update("DELETE FROM ai_agent_run WHERE conversation_id=?", id);
+        jdbc.update("DELETE FROM ai_working_memory_version WHERE conversation_id=?", id);
+        jdbc.update("DELETE FROM ai_conversation_summary_version WHERE conversation_id=?", id);
+        jdbc.update("DELETE FROM ai_conversation_message WHERE conversation_id=?", id);
+        jdbc.update("UPDATE ai_conversation SET rolling_summary=NULL,summary_message_count=0,"
+                + "active_turn_id=NULL,active_request_id=NULL,active_turn_started_at=NULL,updated_at=NOW() "
+                + "WHERE conversation_id=? AND user_id=?", id, userId);
         try { redis.delete(cacheKey(userId, id)); } catch (Exception ignored) { }
     }
 
@@ -113,17 +130,8 @@ public class ConversationService {
         } catch (Exception ignored) { }
     }
 
-    private void refreshSummary(long userId, String id) {
-        Integer count = jdbc.queryForObject("SELECT count(*) FROM ai_conversation_message WHERE conversation_id=?", Integer.class, id);
-        if (count == null || count <= RECENT_MESSAGE_LIMIT || count % 10 != 0) return;
-        List<ConversationMessage> prior = jdbc.query("SELECT * FROM (SELECT * FROM ai_conversation_message WHERE conversation_id=? ORDER BY id DESC OFFSET 20) x ORDER BY id DESC LIMIT 8",
-                (rs, n) -> new ConversationMessage(rs.getLong("id"), rs.getString("role"), rs.getString("content"), rs.getTimestamp("created_at").toInstant()), id);
-        String summary = prior.stream().map(m -> m.role() + ": " + m.content().replaceAll("\\s+", " ")).reduce("", (a, b) -> a.isEmpty() ? b : a + "\n" + b);
-        jdbc.update("UPDATE ai_conversation SET rolling_summary=?,summary_message_count=? WHERE conversation_id=? AND user_id=?",
-                summary.length() > 3000 ? summary.substring(0, 3000) : summary, count - RECENT_MESSAGE_LIMIT, id, userId);
-    }
-
     private static String cacheKey(long userId, String id) { return "sxw:conversation:recent:" + userId + ":" + id; }
+    public record DeletionPreview(long messageCount, long attachmentCount, long inferredMemoryCount) { }
     private ConversationSummary map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
         return new ConversationSummary(rs.getString("conversation_id"), rs.getString("title"), AgentProfileCode.valueOf(rs.getString("profile_code")), rs.getBoolean("pinned"), rs.getString("rolling_summary"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
     }

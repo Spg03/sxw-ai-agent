@@ -23,8 +23,8 @@ export interface TraceRun {
 }
 
 export const traceApi = {
-  list: (limit = 50, signal?: AbortSignal, page = 1, size = 20) =>
-    api.get<TraceRun[]>(`/agent/traces?limit=${limit}&page=${page}&size=${size}`, { signal }),
+  list: (limit = 50, signal?: AbortSignal) =>
+    api.get<TraceRun[]>(`/agent/traces?limit=${limit}`, { signal }),
   getByChatId: (chatId: string, limit = 50, signal?: AbortSignal) =>
     api.get<TraceRun[]>(`/agent/traces/${chatId}?limit=${limit}`, { signal }),
   getByTraceId: (traceId: string, signal?: AbortSignal) =>

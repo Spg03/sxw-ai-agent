@@ -1,4 +1,9 @@
 target
+frontend/node_modules
+frontend/node
+frontend/dist
+.playwright-cli
+output
 .idea
 .vscode
 .git

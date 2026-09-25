@@ -1,36 +1,48 @@
 import { api, type RequestOptions } from './client'
 
+// Field names mirror backend records; operations use business IDs, not database IDs.
 export interface EvalCase {
-  id: number
-  name: string
-  input: string
+  caseId: string
+  caseName: string
+  inputPrompt: string
   expectedOutput?: string
+  profileCode: string
+  caseType: string
+  status: string
+  validationMode: string
+  judgeCriteria?: string
   tags?: string[]
 }
-
 export interface EvalRun {
-  id: number
-  name: string
+  runId: string
+  runName: string
   status: string
+  profileCode: string
   totalCases: number
   passedCases: number
   failedCases: number
-  passRate: number
+  skippedCases: number
+  passRate: number // Backend percentage: 0–100.
   startedAt?: string
-  finishedAt?: string
+  completedAt?: string
+  durationMs?: number
+  errorMessage?: string
 }
-
+export interface CreateEvalCase {
+  name: string
+  input: string
+  expectedOutput?: string
+  profileCode: string
+  validationMode: string
+  judgeCriteria?: string
+}
 export const evalApi = {
-  listCases: (options?: RequestOptions, page = 1, size = 20) =>
-    api.get<EvalCase[]>(`/eval/cases?page=${page}&size=${size}`, options),
-  createCase: (c: Omit<EvalCase, 'id'>, options?: RequestOptions) =>
-    api.post<EvalCase>('/eval/cases', c, options),
-  deleteCase: (id: number, options?: RequestOptions) =>
-    api.delete<void>(`/eval/cases/${id}`, options),
-  listRuns: (options?: RequestOptions, page = 1, size = 20) =>
-    api.get<EvalRun[]>(`/eval/runs?page=${page}&size=${size}`, options),
-  startRun: (name: string, caseIds?: number[], options?: RequestOptions) =>
-    api.post<EvalRun>('/eval/runs', { name, caseIds }, options),
-  getRun: (id: number, options?: RequestOptions) =>
-    api.get<EvalRun>(`/eval/runs/${id}`, options),
+  // The backend returns full lists; the console paginates locally.
+  listCases: (options?: RequestOptions) => api.get<EvalCase[]>('/eval/cases', options),
+  createCase: (data: CreateEvalCase, options?: RequestOptions) => api.post<EvalCase>('/eval/cases', data, options),
+  deleteCase: (caseId: string, options?: RequestOptions) => api.delete<string>('/eval/cases/' + encodeURIComponent(caseId), options),
+  listRuns: (options?: RequestOptions) => api.get<EvalRun[]>('/eval/runs', options),
+  setStatus: (caseId: string, action: 'activate' | 'disable') => api.post<EvalCase>('/eval/cases/' + encodeURIComponent(caseId) + '/' + action),
+  startRun: (name: string, profileCode: string, caseIds: string[], options?: RequestOptions) => api.post<EvalRun>('/eval/run', { name, profileCode, caseIds }, options),
+  getRun: (runId: string, options?: RequestOptions) => api.get<EvalRun>('/eval/runs/' + encodeURIComponent(runId), options),
 }

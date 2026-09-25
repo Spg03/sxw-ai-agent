@@ -7,6 +7,7 @@ services:
       - "8123:8123"
     environment:
       SPRING_PROFILES_ACTIVE: prod
+      SXW_AUTH_JWT_SECRET: ${SXW_AUTH_JWT_SECRET:?Set a stable random JWT secret of at least 32 characters}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       DASHSCOPE_CHAT_MODEL: ${DASHSCOPE_CHAT_MODEL:-qwen-plus}
       SEARCH_API_KEY: ${SEARCH_API_KEY:-}

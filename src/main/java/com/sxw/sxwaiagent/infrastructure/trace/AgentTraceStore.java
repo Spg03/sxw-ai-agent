@@ -132,6 +132,10 @@ public class AgentTraceStore {
         }
     }
 
+    public List<AgentTraceRun> findForUser(long userId, String chatId, String traceId, int limit) {
+        return repository.findForUser(userId, chatId, traceId, limit);
+    }
+
     public List<AgentTraceRun> findByTraceId(String traceId) {
         try {
             return repository.findRecentByTraceId(traceId);

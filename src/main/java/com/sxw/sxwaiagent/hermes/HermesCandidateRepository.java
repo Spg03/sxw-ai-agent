@@ -51,9 +51,17 @@ public class HermesCandidateRepository {
     }
     
     public Optional<HermesCandidate> findById(String candidateId) {
+        return findById(candidateId, false);
+    }
+
+    public Optional<HermesCandidate> findByIdForUpdate(String candidateId) {
+        return findById(candidateId, true);
+    }
+
+    private Optional<HermesCandidate> findById(String candidateId, boolean lock) {
         List<HermesCandidate> results = jdbcTemplate.query("""
             SELECT * FROM ai_hermes_candidate WHERE candidate_id = ?
-            """,
+            """ + (lock ? " FOR UPDATE NOWAIT" : ""),
             (rs, rowNum) -> new HermesCandidate(
                 rs.getString("candidate_id"),
                 rs.getString("run_id"),
@@ -114,5 +122,23 @@ public class HermesCandidateRepository {
         );
         
         log.info("Updated candidate {} status to {} by {}", candidateId, status, reviewedBy);
+    }
+
+    public boolean transition(String candidateId, HermesCandidate.CandidateStatus expected,
+                              HermesCandidate.CandidateStatus next, String reviewedBy) {
+        return jdbcTemplate.update("""
+                UPDATE ai_hermes_candidate SET status=?, reviewed_by=?, reviewed_at=CURRENT_TIMESTAMP
+                WHERE candidate_id=? AND status=?
+                """, next.name(), reviewedBy, candidateId, expected.name()) == 1;
+    }
+
+    /** Includes approvals interrupted before their application transaction completed. */
+    public List<HermesCandidate> findRecoverable() {
+        List<String> ids = jdbcTemplate.queryForList("""
+                SELECT candidate_id FROM ai_hermes_candidate
+                WHERE status='APPLY_FAILED' OR (status='APPROVED' AND reviewed_at < ?)
+                ORDER BY created_at DESC
+                """, String.class, Timestamp.from(Instant.now().minusSeconds(600)));
+        return ids.stream().map(this::findById).flatMap(Optional::stream).toList();
     }
 }

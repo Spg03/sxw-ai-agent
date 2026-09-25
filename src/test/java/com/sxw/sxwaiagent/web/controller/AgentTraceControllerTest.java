@@ -32,12 +32,14 @@ class AgentTraceControllerTest {
                 traceId, "chat-1", now, now, "finished", List.of(event));
 
         DbAgentTraceRepository repo = mock(DbAgentTraceRepository.class);
-        when(repo.findRecentByChatId(eq("chat-1"), anyInt())).thenReturn(List.of(run));
+        when(repo.findForUser(eq(7L), eq("chat-1"), org.mockito.ArgumentMatchers.isNull(), anyInt())).thenReturn(List.of(run));
 
         AgentTraceStore store = new AgentTraceStore(new AgentTraceProperties(), repo);
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgentTraceController(store)).build();
 
-        mockMvc.perform(get("/api/agent/traces/chat-1").param("limit", "1"))
+        var user = new com.sxw.sxwaiagent.auth.AuthenticatedUser(7L, "alice", "Alice", "USER");
+        var auth = new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(user, "", user.getAuthorities());
+        mockMvc.perform(get("/api/agent/traces/chat-1").principal(auth).param("limit", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data[0].traceId").value(traceId))

@@ -31,6 +31,10 @@ public record AgentRequest(
      * 推荐使用 AgentOrchestrator 中的 RequestGuard.generateRequestId() 生成唯一 requestId。
      */
     public String generateRequestId() {
+        Object supplied = metadata == null ? null : metadata.get("requestId");
+        if (supplied instanceof String value && !value.isBlank()) {
+            return value;
+        }
         return UUID.randomUUID().toString();
     }
     

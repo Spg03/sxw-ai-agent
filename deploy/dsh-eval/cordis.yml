@@ -1,0 +1,59 @@
+# Minimal, unattended DSH composition used only by AgentForge offline evaluations.
+# stdout is reserved for newline-delimited JSON-RPC. Do not add terminal/UI plugins.
+
+- id: sdk-jsonrpc-server
+  name: '@deepseek-ai/dsh-sdk-jsonrpc-server'
+  config:
+    maxTokensAsSuccess: true
+
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    baseURL: !!js process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com'
+    thinking: disabled
+    reasoningEffort: off
+    maxTokens: 4096
+    streamIdleTimeoutMs: 180000
+    models:
+      - id: deepseek-chat
+        name: DeepSeek Chat
+        contextWindow: 65536
+        maxTokens: 4096
+
+- id: agent-spine
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    persona: >-
+      You are an offline evaluation agent. Follow the case request exactly.
+      You may only use the four deterministic fixture tools exposed by this
+      container. Never claim that a simulated write changed an external system.
+    includeHarnessIdentity: true
+    includeRuntimeContext: false
+    maxParallelToolCalls: 1
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolBash: false
+    toolJobs: false
+    goals: false
+    toolOrder:
+      - fixture_lookup
+      - calculator
+      - simulated_write
+      - forced_failure
+
+- id: eval-tools
+  name: './eval-tools.mjs'
+
+- id: sessions
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: /tmp/dsh-sessions
+    compression: none
+
+- id: session-checkpoints
+  name: '@deepseek-ai/dsh-session-checkpoint-policy'
+
+- id: token-meter
+  name: '@deepseek-ai/dsh-token-meter'

@@ -67,6 +67,7 @@ public class RefreshTokenRepository {
     public int revokeByTokenHash(String hash) {
         return jdbcTemplate.update("""
             UPDATE ai_refresh_token SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL
+                AND expires_at > CURRENT_TIMESTAMP
             """, Timestamp.from(Instant.now()), hash);
     }
 

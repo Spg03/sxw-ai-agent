@@ -5,12 +5,16 @@ export interface AgentRequest {
   profile: 'LOVE' | 'GENERAL' | 'HERMES'
   message: string
   stream?: boolean
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
   mode?: 'CHAT' | 'PLAN' | 'EXECUTE'
   planId?: string
   enabledTools?: string[]
   webSearchEnabled?: boolean
+  knowledgeDocumentIds?: string[]
   attachmentIds?: string[]
+  requestId?: string
+  memoryReadEnabled?: boolean
+  memoryWriteEnabled?: boolean
 }
 
 export interface ConversationSummary {
@@ -22,72 +26,29 @@ export interface ConversationSummary {
   createdAt: string
   updatedAt: string
 }
-
 export interface ConversationMessage { id: number; role: string; content: string; createdAt: string }
+export interface AgentResponse { requestId: string; traceId: string; answer: string; citations?: string[]; toolCalls?: Array<{ name: string; arguments: string; result: string }>; latencyMs: number }
+export interface AgentMode { id: string; name: string; description: string }
 
-export interface AgentResponse {
-  requestId: string
-  traceId: string
-  answer: string
-  citations?: string[]
-  toolCalls?: Array<{
-    name: string
-    arguments: string
-    result: string
-  }>
-  latencyMs: number
-}
-
-export interface AgentMode {
-  id: string
-  name: string
-  description: string
-}
-
-/** SSE 流式事件类型 */
-export interface StreamTokenEvent {
-  type: 'token'
-  content: string
-}
-
-export interface StreamToolCallEvent {
-  type: 'tool_call'
-  toolName: string
-  arguments: string
-}
-
-export interface StreamToolResultEvent {
-  type: 'tool_result'
-  toolName: string
-  result: string
-}
-
-export interface StreamDoneEvent {
-  type: 'done'
-  requestId: string
-  traceId: string
-  answer: string
-  latencyMs: number
-}
-
-export interface StreamErrorEvent {
-  type: 'error'
-  message: string
-}
-
-export type StreamEvent =
-  | StreamTokenEvent
-  | StreamToolCallEvent
-  | StreamToolResultEvent
-  | StreamDoneEvent
-  | StreamErrorEvent
-
+export interface StreamTokenEvent { type: 'token'; content: string }
+export interface StreamToolCallEvent { type: 'tool_call'; toolName: string; arguments: string }
+export interface StreamToolResultEvent { type: 'tool_result'; toolName: string; result: string }
+export interface StreamDoneEvent { type: 'done'; requestId: string; traceId: string; answer: string; latencyMs: number }
+export interface StreamErrorEvent { type: 'error'; message: string }
+export interface StreamSecurityEvent { riskLevel: string; sanitized: boolean; blocked: boolean; message: string }
 export interface StreamCallbacks {
   onToken: (content: string) => void
   onToolCall?: (toolName: string, args: string) => void
   onToolResult?: (toolName: string, result: string) => void
   onDone?: (event: StreamDoneEvent) => void
   onError?: (message: string) => void
+  onSecurity?: (event: StreamSecurityEvent) => void
+}
+export type ToolCapability = { name: string; description: string; riskLevel: string; requiresApproval: boolean; networkRequired: boolean; available: boolean }
+export type ConversationDeletionPreview = { messageCount: number; attachmentCount: number; inferredMemoryCount: number }
+export type SavedMemory = {
+  memoryId: string; name: string; description: string; memoryType: string; status: string
+  sourceKind: string; alwaysOn: boolean; scopeType?: string; scopeId?: string; priority?: string; createdAt: string
 }
 
 export const agentApi = {
@@ -98,80 +59,76 @@ export const agentApi = {
   createConversation: (profile: ConversationSummary['profile'] = 'GENERAL', title?: string) => api.post<ConversationSummary>('/conversations', { profile, title }),
   conversationMessages: (id: string) => api.get<ConversationMessage[]>(`/conversations/${encodeURIComponent(id)}/messages`),
   updateConversation: (id: string, body: Partial<Pick<ConversationSummary, 'title' | 'profile' | 'pinned'>>) => api.patch<ConversationSummary>(`/conversations/${encodeURIComponent(id)}`, body),
-  deleteConversation: (id: string) => api.delete<void>(`/conversations/${encodeURIComponent(id)}`),
-  tools: (profile: string) => api.get<Array<{name: string; description: string; riskLevel: string; requiresApproval: boolean}>>(`/agent/tools?profile=${encodeURIComponent(profile)}`),
-
-  /**
-   * SSE 流式对话
-   * 使用 EventSource 连接后端 SSE 端点，实时接收 AI 生成的 token。
-   * 返回 EventSource 实例，调用方可通过 close() 中断连接。
-   */
-  streamChat: (
-    params: { chatId: string; message: string; profile: string },
-    callbacks: StreamCallbacks,
-    token?: string | null
-  ): EventSource => {
-    const searchParams = new URLSearchParams({
-      chatId: params.chatId,
-      message: params.message,
-      profile: params.profile,
-    })
-    if (token) {
-      searchParams.set('token', token)
-    }
-
-    const eventSource = new EventSource(`/api/agent/chat/stream?${searchParams.toString()}`)
-
-    eventSource.addEventListener('token', (event: MessageEvent) => {
-      try {
-        const data: StreamTokenEvent = JSON.parse(event.data)
-        callbacks.onToken(data.content)
-      } catch (e) {
-        console.error('Failed to parse token event:', e)
-      }
-    })
-
-    eventSource.addEventListener('tool_call', (event: MessageEvent) => {
-      try {
-        const data: StreamToolCallEvent = JSON.parse(event.data)
-        callbacks.onToolCall?.(data.toolName, data.arguments)
-      } catch (e) {
-        console.error('Failed to parse tool_call event:', e)
-      }
-    })
-
-    eventSource.addEventListener('tool_result', (event: MessageEvent) => {
-      try {
-        const data: StreamToolResultEvent = JSON.parse(event.data)
-        callbacks.onToolResult?.(data.toolName, data.result)
-      } catch (e) {
-        console.error('Failed to parse tool_result event:', e)
-      }
-    })
-
-    eventSource.addEventListener('done', (event: MessageEvent) => {
-      try {
-        const data: StreamDoneEvent = JSON.parse(event.data)
-        callbacks.onDone?.(data)
-      } catch (e) {
-        console.error('Failed to parse done event:', e)
-      }
-      eventSource.close()
-    })
-
-    eventSource.addEventListener('error', (event: MessageEvent) => {
-      // SSE 连接级别的 error 事件（无 data）或业务 error 事件
-      if (event.data) {
-        try {
-          const data: StreamErrorEvent = JSON.parse(event.data)
-          callbacks.onError?.(data.message)
-        } catch {
-          callbacks.onError?.('连接发生错误')
-        }
-      }
-      // 连接断开时 EventSource 会自动重连，但如果是服务端主动关闭则不会
-    })
-
-    return eventSource
+  conversationDeletionPreview: (id: string) => api.get<ConversationDeletionPreview>(`/conversations/${encodeURIComponent(id)}/deletion-preview`),
+  deleteConversation: (id: string, purgeInferredMemories = false) => api.delete<void>(`/conversations/${encodeURIComponent(id)}?purgeInferredMemories=${purgeInferredMemories}`),
+  tools: (profile: string) => api.get<ToolCapability[]>(`/agent/tools?profile=${encodeURIComponent(profile)}`),
+  memoryStatus: (id: string) => api.get<{messageCount:number; hasSummary:boolean; workingMemoryVersion:number}>(`/conversations/${encodeURIComponent(id)}/memory/status`),
+  memoryCandidates: () => api.get<Array<{candidateId:string; title:string; content:string; status:string; sourceKind:string; createdAt:string}>>('/memories/candidates'),
+  decideMemoryCandidate: (id: string, approve: boolean) => api.patch<void>(`/memories/candidates/${encodeURIComponent(id)}/decision`, { approve }),
+  memories: (status = 'ACTIVE') => api.get<SavedMemory[]>(`/memories?status=${encodeURIComponent(status)}`),
+  archiveMemory: (id: string) => api.patch<void>(`/memories/${encodeURIComponent(id)}/archive`),
+  restoreMemory: (id: string) => api.patch<void>(`/memories/${encodeURIComponent(id)}/restore`),
+  pinMemory: (id: string, alwaysOn: boolean) => api.patch<void>(`/memories/${encodeURIComponent(id)}/pin`, { alwaysOn }),
+  deleteMemory: (id: string, reason = 'user request') => api.delete<void>(`/memories/${encodeURIComponent(id)}?reason=${encodeURIComponent(reason)}`),
+  purgeMemory: (id: string, reason = 'user request') => api.post<void>(`/memories/${encodeURIComponent(id)}/purge`, { reason }),
+  uploadAttachment: async (conversationId: string, file: File) => {
+    const token = api.getToken(); const form = new FormData(); form.append('file', file)
+    const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/attachments`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form })
+    if (!response.ok) throw new Error(await responseError(response, `附件上传失败：${response.status}`))
+    return (await response.json()).data as { attachmentId: string; name: string; sizeBytes: number; status: string }
   },
+  deleteAttachment: (conversationId: string, attachmentId: string) => api.delete<void>(`/conversations/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(attachmentId)}`),
+  plansForChat: (conversationId: string) => api.get<Array<{planId:string; goal:string; status:string}>>(`/plans/chat/${encodeURIComponent(conversationId)}`),
+  approvePlan: (planId: string) => api.post<string>(`/plans/${encodeURIComponent(planId)}/approve`),
+  rejectPlan: (planId: string) => api.post<string>(`/plans/${encodeURIComponent(planId)}/reject`),
+
+  streamChat: (params: AgentRequest, callbacks: StreamCallbacks, token?: string | null): { close: () => void } => {
+    const controller = new AbortController()
+    const dispatch = (eventName: string, raw: string) => {
+      try {
+        const data = JSON.parse(raw)
+        if (eventName === 'token') callbacks.onToken((data as StreamTokenEvent).content)
+        else if (eventName === 'tool_call') callbacks.onToolCall?.((data as StreamToolCallEvent).toolName, (data as StreamToolCallEvent).arguments)
+        else if (eventName === 'tool_result') callbacks.onToolResult?.((data as StreamToolResultEvent).toolName, (data as StreamToolResultEvent).result)
+        else if (eventName === 'done') callbacks.onDone?.(data as StreamDoneEvent)
+        else if (eventName === 'security') callbacks.onSecurity?.(data as StreamSecurityEvent)
+        else if (eventName === 'error') callbacks.onError?.((data as StreamErrorEvent).message)
+      } catch { callbacks.onError?.('SSE response parsing failed') }
+    }
+    void (async () => {
+      try {
+        const response = await fetch('/api/agent/chat/stream', {
+          method: 'POST', signal: controller.signal,
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify({ ...params, stream: true, requestId: params.requestId ?? crypto.randomUUID() }),
+        })
+        if (!response.ok) throw new Error(await responseError(response, `请求失败：HTTP ${response.status}`))
+        if (!response.body) throw new Error('未收到服务端响应流，请重试')
+        const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''
+        while (!controller.signal.aborted) {
+          const { value, done } = await reader.read(); if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          let boundary: number
+          while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+            const frame = buffer.slice(0, boundary); buffer = buffer.slice(boundary + 2)
+            const event = frame.match(/^event:\s*(.+)$/m)?.[1]?.trim() ?? 'message'
+            const data = frame.match(/^data:\s*(.+)$/m)?.[1]
+            if (data) dispatch(event, data)
+          }
+        }
+      } catch (error) { if (!controller.signal.aborted) callbacks.onError?.(error instanceof Error ? error.message : '') }
+    })()
+    return { close: () => controller.abort() }
+  },
+}
+
+/** Preserve actionable validation errors (for example unreadable or unavailable attachments). */
+async function responseError(response: Response, fallback: string): Promise<string> {
+  try {
+    const body: unknown = await response.json()
+    if (body && typeof body === 'object' && 'message' in body && typeof body.message === 'string' && body.message.trim()) {
+      return body.message
+    }
+  } catch { /* A gateway may return HTML or an empty body; retain the safe status fallback. */ }
+  return fallback
 }

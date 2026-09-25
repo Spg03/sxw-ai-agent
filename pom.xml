@@ -338,6 +338,9 @@
                         <spring.datasource.password></spring.datasource.password>
                         <spring.jpa.hibernate.ddl-auto>create-drop</spring.jpa.hibernate.ddl-auto>
                         <spring.flyway.enabled>false</spring.flyway.enabled>
+                        <sxw.eval.queue.enabled>false</sxw.eval.queue.enabled>
+                        <sxw.scheduling.enabled>false</sxw.scheduling.enabled>
+                        <sxw.agent.attachment.cleanup-enabled>false</sxw.agent.attachment.cleanup-enabled>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

@@ -10,6 +10,9 @@ import com.sxw.sxwaiagent.agent.prompt.PromptRunRecorder;
 import com.sxw.sxwaiagent.agent.tool.ToolExecutor;
 import com.sxw.sxwaiagent.agent.tool.ToolRegistry;
 import com.sxw.sxwaiagent.agent.tool.ToolResult;
+import com.sxw.sxwaiagent.context.ContextBudget;
+import com.sxw.sxwaiagent.context.ContextBudgetAllocator;
+import com.sxw.sxwaiagent.context.TokenCounter;
 import com.sxw.sxwaiagent.plan.PlanReviewService;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -21,7 +24,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -56,14 +58,16 @@ class ToolUseLoopRuntimeTest {
     @Mock private ChatModel chatModel;
     @Mock private ToolExecutor toolExecutor;
     @Mock private ApplicationEventPublisher eventPublisher;
-    @Mock private ChatMemory chatMemory;
     @Mock private PromptAssembler promptAssembler;
     @Mock private PromptRunRecorder promptRunRecorder;
     @Mock private PlanReviewService planReviewService;
     @Mock private ToolRegistry toolRegistry;
+    @Mock private com.sxw.sxwaiagent.memory.AgentRunSnapshotService snapshots;
+    @Mock private com.sxw.sxwaiagent.conversation.ConversationEventService conversationEvents;
     @Mock private AgentProfile profile;
 
     private ToolUseLoopRuntime runtime;
+    private ContextBudgetAllocator contextBudgetAllocator;
 
     @BeforeEach
     void setUp() {
@@ -76,12 +80,17 @@ class ToolUseLoopRuntimeTest {
                 .slidingWindowSize(10)
                 .build());
 
+        contextBudgetAllocator = new ContextBudgetAllocator(
+                ContextBudget.defaultBudget(), new TokenCounter());
+        ReflectionTestUtils.setField(contextBudgetAllocator, "maxRecentTurns", 10);
+        ReflectionTestUtils.setField(contextBudgetAllocator, "maxRecentMessages", 40);
+
         runtime = new ToolUseLoopRuntime(
-                chatModel, toolExecutor, eventPublisher, chatMemory,
+                chatModel, toolExecutor, eventPublisher,
                 promptAssembler, promptRunRecorder,
                 Executors.newSingleThreadExecutor(),
                 retryRegistry, cbRegistry,
-                planReviewService, toolRegistry
+                planReviewService, toolRegistry, contextBudgetAllocator, snapshots, conversationEvents
         );
 
         // 设置 @Value 字段

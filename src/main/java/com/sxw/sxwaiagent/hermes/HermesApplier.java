@@ -87,7 +87,7 @@ public class HermesApplier {
         } else {
             log.warn("Knowledge ingest skipped/failed for candidate {}: {}",
                     candidate.candidateId(), result.message());
-            return "Knowledge ingest result: " + result.message();
+            throw new IllegalStateException("Knowledge ingestion failed: " + result.message());
         }
     }
 

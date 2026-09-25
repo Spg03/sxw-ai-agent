@@ -12,11 +12,18 @@ public record ContextItem(
         Long id,
         String requestId,
         String traceId,
-        int turn,
-        Section section,
-        String contentType,
+        String conversationId,
+        Long userId,
+        int callNo,
+        String sectionKey,
+        String sectionKind,
+        String itemType,
+        String itemId,
+        String inclusionStatus,
+        String contentHash,
+        int contentLength,
+        String sourceRef,
         String contentPreview,
-        String contentFull,
         int tokenCount,
         LocalDateTime createdAt
 ) {
@@ -40,19 +47,22 @@ public record ContextItem(
             String contentFull,
             int tokenCount
     ) {
-        String preview = contentFull != null && contentFull.length() > 500
-                ? contentFull.substring(0, 500) + "..."
-                : contentFull;
-
         return new ContextItem(
                 null,
                 requestId,
                 traceId,
+                null,
+                null,
                 turn,
-                section,
+                section.name(),
+                "DYNAMIC",
                 "text",
-                preview,
-                contentFull,
+                null,
+                "INCLUDED",
+                null,
+                contentFull == null ? 0 : contentFull.length(),
+                null,
+                "[content withheld; " + (contentFull == null ? 0 : contentFull.length()) + " chars]",
                 tokenCount,
                 LocalDateTime.now()
         );

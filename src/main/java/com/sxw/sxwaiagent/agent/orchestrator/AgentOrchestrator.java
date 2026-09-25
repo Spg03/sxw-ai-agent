@@ -9,13 +9,14 @@ import com.sxw.sxwaiagent.agent.runtime.AgentRuntime;
 import com.sxw.sxwaiagent.agent.runtime.LegacyReActRuntime;
 import com.sxw.sxwaiagent.agent.runtime.ToolUseLoopRuntime;
 import com.sxw.sxwaiagent.plan.AgentRunMode;
+import com.sxw.sxwaiagent.conversation.ConversationContextService;
+import com.sxw.sxwaiagent.conversation.ConversationEventService;
+import com.sxw.sxwaiagent.memory.AgentRunSnapshotService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,7 +39,9 @@ public class AgentOrchestrator {
     private final Map<AgentProfileCode, AgentProfile> profileMap;
     private final Map<AgentProfileCode, AgentRuntime> runtimeMap;
     private final RequestGuard requestGuard;
-    private final ChatMemory chatMemory;
+    private final ConversationContextService conversationContext;
+    private final ConversationEventService conversationEvents;
+    private final AgentRunSnapshotService snapshots;
     
     // 保存两种 Runtime 的引用，支持动态切换
     private final AgentRuntime legacyRuntime;
@@ -48,7 +51,10 @@ public class AgentOrchestrator {
             List<AgentProfile> profiles,
             List<AgentRuntime> runtimes,
             RequestGuard requestGuard,
-            ChatMemory agentChatMemory
+            ConversationContextService conversationContext,
+            ConversationEventService conversationEvents,
+            AgentRunSnapshotService snapshots,
+            @Value("${sxw.agent.conversation-v3-enabled:true}") boolean conversationV3Enabled
     ) {
         this.profileMap = new EnumMap<>(AgentProfileCode.class);
         for (AgentProfile profile : profiles) {
@@ -63,25 +69,34 @@ public class AgentOrchestrator {
         // 使用 ConcurrentHashMap 保证 switchRuntime() 的线程安全性
         this.runtimeMap = new ConcurrentHashMap<>();
         
-        // LOVE 和 HERMES 继续使用 LegacyReActRuntime（保持现有行为）
-        if (legacyRuntime != null) {
+        // V3 uses the same governed runtime for every profile so PostgreSQL remains
+        // the only active history source. Legacy remains available for rollback.
+        if (conversationV3Enabled && toolUseLoopRuntime != null) {
+            this.runtimeMap.put(AgentProfileCode.LOVE, toolUseLoopRuntime);
+            this.runtimeMap.put(AgentProfileCode.HERMES, toolUseLoopRuntime);
+            this.runtimeMap.put(AgentProfileCode.GENERAL, toolUseLoopRuntime);
+            log.info("Conversation V3 enabled: assigned ToolUseLoopRuntime to all profiles");
+        } else if (legacyRuntime != null) {
             this.runtimeMap.put(AgentProfileCode.LOVE, legacyRuntime);
             this.runtimeMap.put(AgentProfileCode.HERMES, legacyRuntime);
             log.info("Assigned LegacyReActRuntime to LOVE and HERMES profiles");
         }
         
-        // GENERAL 使用 ToolUseLoopRuntime（P2 新特性）
-        if (toolUseLoopRuntime != null) {
-            this.runtimeMap.put(AgentProfileCode.GENERAL, toolUseLoopRuntime);
-            log.info("Assigned ToolUseLoopRuntime to GENERAL profile");
-        } else if (legacyRuntime != null) {
-            // 降级：如果 ToolUseLoopRuntime 不可用，GENERAL 也使用 LegacyReActRuntime
-            this.runtimeMap.put(AgentProfileCode.GENERAL, legacyRuntime);
-            log.warn("ToolUseLoopRuntime not found, falling back to LegacyReActRuntime for GENERAL profile");
+        // Complete only missing assignments. Do not overwrite the V3 mapping above.
+        if (!this.runtimeMap.containsKey(AgentProfileCode.GENERAL)) {
+            if (toolUseLoopRuntime != null) {
+                this.runtimeMap.put(AgentProfileCode.GENERAL, toolUseLoopRuntime);
+                log.info("Assigned ToolUseLoopRuntime to GENERAL profile");
+            } else if (legacyRuntime != null) {
+                this.runtimeMap.put(AgentProfileCode.GENERAL, legacyRuntime);
+                log.warn("ToolUseLoopRuntime not found, falling back to LegacyReActRuntime for GENERAL profile");
+            }
         }
         
         this.requestGuard = requestGuard;
-        this.chatMemory = agentChatMemory;
+        this.conversationContext = conversationContext;
+        this.conversationEvents = conversationEvents;
+        this.snapshots = snapshots;
         
         log.info("AgentOrchestrator initialized with {} profiles, {} runtime assignments",
                 profileMap.size(), runtimeMap.size());
@@ -115,11 +130,11 @@ public class AgentOrchestrator {
         log.info("[{}] Using runtime: {} for profile: {}", 
                 requestId, runtime.getClass().getSimpleName(), request.profile());
         
-        // 4. 从 ChatMemory 加载历史消息
-        List<Message> history = loadHistory(request.chatId(), requestId);
+        // 4. 从 PostgreSQL 事件流加载版本化上下文
+        Map<String, Object> metadata = new HashMap<>(request.metadata() == null ? Map.of() : request.metadata());
+        List<Message> history = loadHistory(request.chatId(), requestId, request.message(), metadata);
         
         // 5. 构建 AgentContext
-        Map<String, Object> metadata = request.metadata() == null ? Map.of() : request.metadata();
         AgentRunMode runMode = AgentRunMode.CHAT;
         Object modeValue = metadata.get("runMode");
         if (modeValue != null) {
@@ -137,11 +152,29 @@ public class AgentOrchestrator {
                 .planId((String) metadata.get("planId"))
                 .build();
         
-        // 6. 执行
-        AgentResponse response = runtime.execute(context);
-        
-        // 7. 保存用户消息和 Agent 回复到 ChatMemory
-        saveMessages(request.chatId(), request.message(), response.answer(), requestId);
+        // 6. Persist equivalent input before calling the model.
+        String runId = metadata.get("userId") instanceof Number user
+                ? snapshots.begin(request.chatId(), user.longValue(), requestId, traceId) : null;
+        AgentResponse response;
+        try {
+            response = runtime.execute(context);
+            if (metadata.get("userId") instanceof Number
+                    && conversationEvents.requestState(request.chatId(), requestId).isPresent()) {
+                conversationEvents.completeTurn(request.chatId(), requestId, response.answer(),
+                        Map.of("traceId", traceId, "latencyMs", response.latencyMs()));
+            }
+            if (runId != null) snapshots.complete(runId, "COMPLETED");
+        } catch (RuntimeException e) {
+            if (metadata.get("userId") instanceof Number
+                    && conversationEvents.requestState(request.chatId(), requestId).isPresent()) {
+                conversationEvents.failTurn(request.chatId(), requestId,
+                        e instanceof com.sxw.sxwaiagent.context.ContextBudgetExceededException
+                                ? "REJECTED_TOO_LONG" : "FAILED",
+                        e.getClass().getSimpleName());
+            }
+            if (runId != null) snapshots.complete(runId, "FAILED", e.getClass().getSimpleName());
+            throw e;
+        }
         
         long latencyMs = System.currentTimeMillis() - startTime;
         log.info("[{}] Request completed in {}ms using {}", requestId, latencyMs, runtime.getClass().getSimpleName());
@@ -191,44 +224,28 @@ public class AgentOrchestrator {
     }
     
     /**
-     * 从 ChatMemory 加载历史消息
+     * 从 PostgreSQL 事件流加载摘要、工作记忆和最近完整 Turn。
      * <p>
      * chatId 为空或首次对话时返回空列表，不影响正常流程。
      */
-    private List<Message> loadHistory(String chatId, String requestId) {
+    private List<Message> loadHistory(String chatId, String requestId, String currentMessage,
+                                      Map<String,Object> metadata) {
         if (chatId == null || chatId.isBlank()) {
             log.debug("[{}] No chatId provided, skipping history load", requestId);
             return List.of();
         }
         try {
-            List<Message> history = chatMemory.get(chatId);
-            log.info("[{}] Loaded {} history messages for chatId={}", requestId, history.size(), chatId);
-            return history;
-        } catch (Exception e) {
-            log.warn("[{}] Failed to load history for chatId={}, using empty history: {}",
-                    requestId, chatId, e.getMessage());
-            return List.of();
-        }
-    }
-    
-    /**
-     * 保存用户消息和 Agent 回复到 ChatMemory
-     */
-    private void saveMessages(String chatId, String userMessage, String assistantAnswer, String requestId) {
-        if (chatId == null || chatId.isBlank()) {
-            return;
-        }
-        try {
-            List<Message> messages = new ArrayList<>();
-            messages.add(new UserMessage(userMessage));
-            if (assistantAnswer != null && !assistantAnswer.isBlank()) {
-                messages.add(new AssistantMessage(assistantAnswer));
+            if (metadata.get("userId") instanceof Number userId) {
+                var slice = conversationContext.prepare(userId.longValue(), chatId, requestId, currentMessage);
+                slice.contributeTo(metadata);
+                return slice.messages();
             }
-            chatMemory.add(chatId, messages);
-            log.debug("[{}] Saved {} messages to ChatMemory for chatId={}", requestId, messages.size(), chatId);
+            return List.of();
         } catch (Exception e) {
-            log.warn("[{}] Failed to save messages for chatId={}: {}",
-                    requestId, chatId, e.getMessage());
+            if (conversationEvents.requestState(chatId, requestId).isPresent()) {
+                conversationEvents.failTurn(chatId, requestId, "FAILED", "CONTEXT_LOAD_FAILED");
+            }
+            throw new IllegalStateException("Unable to build conversation context", e);
         }
     }
     

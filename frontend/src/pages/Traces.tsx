@@ -1,234 +1,104 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams, Link } from 'react-router-dom'
+import { Activity, Clock, Zap, RotateCw, Search, Copy, AlertTriangle, CheckCircle, MessageSquare } from 'lucide-react'
 import { traceApi, type TraceRun } from '../api/traces'
-import { Activity, Clock, Zap, MessageSquare } from 'lucide-react'
-import Pagination from '../components/Pagination'
+import { ConsoleHeader, ConsoleNotice, ConsolePager, EmptyState, StatusBadge } from '../components/ConsoleUI'
+import { formatDate, resultData, errorMessage } from '../utils/console'
 
-function formatTime(iso: string): string {
-  try {
-    const d = new Date(iso)
-    return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  } catch {
-    return iso
-  }
-}
-
-function computeLatency(startedAt: string, finishedAt: string | null): string {
-  if (!finishedAt) return '...'
-  const ms = new Date(finishedAt).getTime() - new Date(startedAt).getTime()
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(1)}s`
+function latency(start: string, end: string | null) {
+  if (!end) return '进行中'
+  const ms = new Date(end).getTime() - new Date(start).getTime()
+  return !Number.isFinite(ms) || ms < 0 ? '—' : ms < 1000 ? ms + ' ms' : (ms / 1000).toFixed(1) + ' s'
 }
 
 export default function Traces() {
+  const [params, setParams] = useSearchParams()
+  const selectedId = params.get('traceId') || ''
   const [traces, setTraces] = useState<TraceRun[]>([])
-  const [selectedTrace, setSelectedTrace] = useState<TraceRun | null>(null)
+  const [detail, setDetail] = useState<TraceRun | null>(null)
   const [loading, setLoading] = useState(true)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [detailError, setDetailError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [reload, setReload] = useState(0)
+  const [detailReload, setDetailReload] = useState(0)
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState('ALL')
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
-  const [totalPages, setTotalPages] = useState(1)
+  const [size, setSize] = useState(10)
 
   useEffect(() => {
     const controller = new AbortController()
-    loadTraces(controller.signal)
+    setLoading(true); setError('')
+    // API supports a bounded recent list, not server-side page/size.
+    traceApi.list(100, controller.signal).then(res => {
+      if (!controller.signal.aborted) setTraces(resultData(res) ?? [])
+    }).catch(err => { if (!controller.signal.aborted) setError(errorMessage(err)) })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
-  }, [page, pageSize])
+  }, [reload])
 
-  const loadTraces = async (signal?: AbortSignal) => {
-    setLoading(true)
-    try {
-      const res = await traceApi.list(50, signal, page, pageSize)
-      if (res.code === 0) {
-        const data = res.data ?? []
-        setTraces(data)
-        // 后端已分页，根据返回数量估算是否还有更多页
-        setTotalPages(data.length >= pageSize ? page + 1 : page)
+  useEffect(() => {
+    const controller = new AbortController()
+    setDetail(null); setDetailError(''); setDetailLoading(!!selectedId)
+    if (selectedId) traceApi.getByTraceId(selectedId, controller.signal).then(res => {
+      if (!controller.signal.aborted) {
+        const value = resultData(res)
+        if (!value) throw new Error('未找到这条追踪记录，可能已过期或不再保留。')
+        setDetail(value)
       }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      console.error('Failed to load traces', err)
-    } finally {
-      setLoading(false)
-    }
+    }).catch(err => { if (!controller.signal.aborted) setDetailError(errorMessage(err)) })
+      .finally(() => { if (!controller.signal.aborted) setDetailLoading(false) })
+    return () => controller.abort()
+  }, [selectedId, detailReload, reload])
+
+  const filtered = traces.filter(t => (status === 'ALL' || t.status.toUpperCase() === status) && [t.traceId, t.chatId].join(' ').toLowerCase().includes(query.trim().toLowerCase()))
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(filtered.length / size)))
+  const copyId = async () => {
+    try { await navigator.clipboard.writeText(selectedId); setNotice('Trace ID 已复制。') }
+    catch { setNotice('复制失败，请选中详情中的 Trace ID 手动复制。') }
   }
 
-  const loadTraceDetail = async (traceId: string) => {
-    try {
-      const res = await traceApi.getByTraceId(traceId)
-      if (res.code === 0 && res.data) {
-        setSelectedTrace(res.data)
-      }
-    } catch (err) {
-      console.error('Failed to load trace', err)
-    }
-  }
-
-  const handlePageChange = (newPage: number) => {
-    setPage(newPage)
-    setSelectedTrace(null)
-  }
-
-  const handlePageSizeChange = (size: number) => {
-    setPageSize(size)
-    setPage(1)
-    setSelectedTrace(null)
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-slate-100">执行追踪</h1>
-        <p className="text-slate-400 mt-2">查看 Agent 执行过程和工具调用链</p>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Traces List */}
-        <div className="lg:col-span-1 glass rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-slate-100 mb-4">追踪列表</h2>
-          {loading ? (
-            <div className="text-center py-8 text-slate-400">加载中...</div>
-          ) : traces.length === 0 ? (
-            <div className="text-center py-8">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-sky-500/20 to-blue-500/20 flex items-center justify-center mx-auto mb-3">
-                <Activity size={28} className="text-sky-400" />
-              </div>
-              <p className="text-sm text-slate-400">暂无追踪记录</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {traces.map(trace => (
-                <div
-                  key={trace.traceId}
-                  onClick={() => loadTraceDetail(trace.traceId)}
-                  className={`p-4 rounded-lg cursor-pointer transition-all ${
-                    selectedTrace?.traceId === trace.traceId
-                      ? 'bg-gradient-to-r from-sky-500/20 to-blue-500/20 border border-sky-500/30'
-                      : 'bg-white/5 hover:bg-white/10'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-mono text-slate-300" title={trace.traceId}>
-                      {trace.traceId.slice(-8)}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs ${
-                      trace.status === 'completed'
-                        ? 'bg-emerald-500/20 text-emerald-300'
-                        : trace.status === 'failed'
-                          ? 'bg-rose-500/20 text-rose-300'
-                          : 'bg-amber-500/20 text-amber-300'
-                    }`}>
-                      {trace.status}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-slate-400 mb-1">
-                    <span className="flex items-center gap-1" title={trace.chatId}>
-                      <MessageSquare size={12} />
-                      {trace.chatId.slice(-6)}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Zap size={12} />
-                      {trace.events?.length ?? 0} 事件
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Clock size={12} />
-                      {computeLatency(trace.startedAt, trace.finishedAt)}
-                    </span>
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    {formatTime(trace.startedAt)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          <Pagination
-            currentPage={page}
-            totalPages={totalPages}
-            onPageChange={handlePageChange}
-            pageSize={pageSize}
-            onPageSizeChange={handlePageSizeChange}
-          />
-        </div>
-
-        {/* Trace Detail */}
-        <div className="lg:col-span-2 glass rounded-xl p-6">
-          {selectedTrace ? (
-            <div>
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-xl font-bold text-slate-100">追踪详情</h2>
-                  <p className="text-xs font-mono text-slate-400 mt-1">{selectedTrace.traceId}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">chatId: {selectedTrace.chatId}</p>
-                </div>
-                <span className={`px-3 py-1 rounded-full text-sm ${
-                  selectedTrace.status === 'completed'
-                    ? 'bg-emerald-500/20 text-emerald-300'
-                    : selectedTrace.status === 'failed'
-                      ? 'bg-rose-500/20 text-rose-300'
-                      : 'bg-amber-500/20 text-amber-300'
-                }`}>
-                  {selectedTrace.status}
-                </span>
-              </div>
-
-              <div className="space-y-3">
-                {(selectedTrace.events ?? []).map((event, idx) => (
-                  <div key={idx} className="relative pl-8 pb-4">
-                    {idx < (selectedTrace.events?.length ?? 0) - 1 && (
-                      <div className="absolute left-3 top-4 bottom-0 w-px bg-white/10" />
-                    )}
-                    <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-gradient-to-br from-sky-500 to-blue-500 flex items-center justify-center shadow-lg shadow-sky-500/20">
-                      <div className="w-2 h-2 rounded-full bg-white" />
-                    </div>
-
-                    <div className="p-4 rounded-lg bg-white/5 border border-white/10">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-3">
-                          <span className="px-2 py-0.5 rounded-full bg-sky-500/20 text-xs text-sky-300">
-                            {event.phase}
-                          </span>
-                          {event.toolName && (
-                            <span className="text-xs text-slate-300">{event.toolName}</span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-slate-400">
-                          <Clock size={12} />
-                          {event.latencyMs}ms
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-slate-500 mb-2">
-                        <span>步骤 {event.step}</span>
-                        <span className={`px-2 py-0.5 rounded-full ${
-                          event.status === 'success'
-                            ? 'bg-emerald-500/20 text-emerald-300'
-                            : event.status === 'error'
-                              ? 'bg-rose-500/20 text-rose-300'
-                              : 'bg-slate-500/20 text-slate-300'
-                        }`}>
-                          {event.status}
-                        </span>
-                      </div>
-                      {event.outputSummary && (
-                        <p className="text-xs text-slate-400 mt-2">{event.outputSummary}</p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-sky-500/20 to-blue-500/20 flex items-center justify-center mx-auto mb-4">
-                  <Activity size={32} className="text-sky-400" />
-                </div>
-                <h2 className="text-xl font-semibold text-slate-200 mb-2">选择一个追踪</h2>
-                <p className="text-sm text-slate-400">从左侧列表选择追踪查看执行详情</p>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+  return <div className="console-page">
+    <ConsoleHeader icon={Activity} eyebrow="OBSERVABILITY · TRACES" title="执行追踪" description="沿着调用时间线，了解 Agent 如何思考、调用工具与完成任务。">
+      <button className="console-button" disabled={loading} onClick={() => setReload(n => n + 1)}><RotateCw size={16} className={loading ? 'console-spin' : ''} />刷新记录</button>
+    </ConsoleHeader>
+    <div className="console-stats">
+      <div className="console-stat"><Activity /><div><strong>{loading ? '—' : traces.length}</strong><span>最近追踪 · 最多 100 条</span></div></div>
+      <div className="console-stat"><CheckCircle /><div><strong>{loading ? '—' : traces.filter(t => t.status.toUpperCase() === 'COMPLETED').length}</strong><span>当前记录中已完成</span></div></div>
+      <div className="console-stat"><AlertTriangle /><div><strong>{loading ? '—' : traces.filter(t => t.status.toUpperCase() === 'FAILED').length}</strong><span>当前记录中执行失败</span></div></div>
     </div>
-  )
+    <ConsoleNotice message={error} error /><ConsoleNotice message={notice} />
+    <div className="console-trace-grid">
+      <section className="console-panel" aria-label="追踪列表">
+        <div className="console-panel-header"><div><h2><Activity size={19} />追踪列表</h2><p>最近 100 条记录，按时间倒序排列</p></div></div>
+        <div className="console-toolbar"><label className="console-search"><Search size={16} /><input aria-label="搜索追踪" placeholder="Trace ID / 会话 ID" value={query} onChange={e => { setQuery(e.target.value); setPage(1) }} /></label>
+          <select className="console-select" aria-label="追踪状态" value={status} onChange={e => { setStatus(e.target.value); setPage(1) }}><option value="ALL">全部状态</option><option value="COMPLETED">已完成</option><option value="FAILED">失败</option><option value="RUNNING">运行中</option></select>
+        </div>
+        {loading ? <EmptyState icon={Activity} title="正在加载记录…" loading /> : error ? <EmptyState icon={AlertTriangle} title="追踪列表加载失败" description="请检查服务状态后刷新。" /> : !filtered.length ? <EmptyState icon={Activity} title={traces.length ? '没有匹配的记录' : '还没有执行追踪'} description={traces.length ? '更换关键词或清除筛选后重试。' : '发起一次 Agent 对话后，可在这里查看执行过程。'}>
+          {traces.length ? <button className="console-button" onClick={() => { setQuery(''); setStatus('ALL'); setPage(1) }}>清除筛选</button> : <Link className="console-button" to="/chat"><MessageSquare size={15} />开始对话</Link>}
+        </EmptyState> : <div className="console-trace-list">{filtered.slice((currentPage - 1) * size, currentPage * size).map(trace => <button className="console-trace-item" key={trace.traceId} aria-pressed={selectedId === trace.traceId} aria-label={'查看追踪 ' + trace.traceId} onClick={() => { setNotice(''); setParams({ traceId: trace.traceId }) }}>
+          <header><strong title={trace.traceId}># {trace.traceId.slice(-12)}</strong><StatusBadge status={trace.status} /></header>
+          <div className="console-meta"><span><Zap size={12} style={{ display: 'inline' }} /> {trace.events?.length ?? 0} 事件</span><span><Clock size={12} style={{ display: 'inline' }} /> {latency(trace.startedAt, trace.finishedAt)}</span></div>
+          <div className="console-meta"><span>{formatDate(trace.startedAt)}</span><span title={trace.chatId}>会话 {trace.chatId?.slice(-8) || '—'}</span></div>
+        </button>)}</div>}
+        {!loading && !error && filtered.length > 0 && <ConsolePager page={currentPage} size={size} total={filtered.length} onPage={setPage} onSize={n => { setSize(n); setPage(1) }} />}
+      </section>
+      <section className="console-panel console-trace-detail" aria-label="追踪详情" aria-busy={detailLoading}>
+        {detailLoading ? <EmptyState icon={Activity} title="正在读取执行详情…" loading /> : detailError ? <EmptyState icon={AlertTriangle} title="无法加载追踪详情" description={detailError}><button className="console-button" onClick={() => setDetailReload(n => n + 1)}>重试加载</button></EmptyState>
+          : detail ? <>
+            <div className="console-panel-header"><div><h2><Zap size={19} />执行详情</h2><p>从请求开始到最终响应的完整记录</p></div><StatusBadge status={detail.status} /></div>
+            <div className="console-trace-summary"><div className="console-card-head"><code>{detail.traceId}</code><button className="console-icon-button" title="复制 Trace ID" aria-label="复制 Trace ID" onClick={copyId}><Copy size={15} /></button></div>
+              <p>会话 ID：{detail.chatId || '—'}</p><div className="console-tags"><span>开始 {formatDate(detail.startedAt)}</span><span>耗时 {latency(detail.startedAt, detail.finishedAt)}</span><span>{detail.events?.length ?? 0} 个事件</span></div></div>
+            {!detail.events?.length ? <EmptyState icon={Zap} title="暂无事件明细" description="该追踪尚未记录执行事件，可稍后刷新查看。" /> : <ol className="console-timeline">{detail.events.map((event, index) => <li key={index}><article className="console-card">
+              <div className="console-card-head"><h3>{event.phase || '执行事件'}{event.toolName && ' · ' + event.toolName}</h3><StatusBadge status={event.status || 'UNKNOWN'} label={event.status ? undefined : '未知状态'} /></div>
+              <div className="console-tags"><span>步骤 {event.step}</span><span>{event.latencyMs ?? 0} ms</span><span>{formatDate(event.createdAt)}</span></div>
+              {event.outputSummary && <p className="console-content">{event.outputSummary}</p>}
+              {event.inputSummary && <details><summary>查看输入摘要</summary><p className="console-content">{event.inputSummary}</p></details>}
+            </article></li>)}</ol>}
+          </> : <EmptyState icon={Activity} title="选择一条追踪，展开执行过程" description="点击列表中的记录，查看各步骤的输入输出、工具调用和耗时。" />}
+      </section>
+    </div>
+  </div>
 }

@@ -26,13 +26,11 @@ export const hermesApi = {
   /** 获取单个候选详情 */
   get: (candidateId: string, options?: RequestOptions) =>
     api.get<HermesCandidate>(`/hermes/candidates/${candidateId}`, options),
-  /** 审批通过（reviewedBy 为 query param） */
-  approve: (candidateId: string, reviewedBy: string, options?: RequestOptions) =>
-    api.post<string>(`/hermes/candidates/${candidateId}/approve?reviewedBy=${encodeURIComponent(reviewedBy)}`, undefined, options),
-  /** 拒绝（reviewedBy 为 query param） */
-  reject: (candidateId: string, reviewedBy: string, options?: RequestOptions) =>
-    api.post<string>(`/hermes/candidates/${candidateId}/reject?reviewedBy=${encodeURIComponent(reviewedBy)}`, undefined, options),
-  /** 重试应用（reviewedBy 为 query param） */
-  retry: (candidateId: string, reviewedBy: string, options?: RequestOptions) =>
-    api.post<string>(`/hermes/candidates/${candidateId}/retry?reviewedBy=${encodeURIComponent(reviewedBy)}`, undefined, options),
+  /** 审核身份由后端从登录信息中获取。 */
+  approve: (candidateId: string, options?: RequestOptions) =>
+    api.post<string>(`/hermes/candidates/${encodeURIComponent(candidateId)}/approve`, undefined, options),
+  reject: (candidateId: string, options?: RequestOptions) =>
+    api.post<string>(`/hermes/candidates/${encodeURIComponent(candidateId)}/reject`, undefined, options),
+  retry: (candidateId: string, options?: RequestOptions) =>
+    api.post<string>(`/hermes/candidates/${encodeURIComponent(candidateId)}/retry`, undefined, options),
 }

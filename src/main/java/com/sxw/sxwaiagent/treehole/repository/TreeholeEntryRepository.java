@@ -7,5 +7,7 @@ import java.util.List;
 
 public interface TreeholeEntryRepository extends JpaRepository<TreeholeEntry, Long> {
 
+    long countByUserId(Long userId);
+
     List<TreeholeEntry> findByUserIdOrderByCreatedAtDesc(Long userId);
 }

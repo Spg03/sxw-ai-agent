@@ -166,6 +166,14 @@ AgentRunCompletedEvent
 | ai_eval_case | 评测用例 | P9 |
 | ai_eval_run | 评测运行 | P9 |
 
+### P4 Prompt / Context 可观测性（已接入主运行时）
+
+- Prompt 版本由 `sxw.agent.prompt.active-version` 显式管理，不再使用 Tool-Use Loop 的调用轮次充当版本号。
+- 每次真实模型调用写入 `ai_prompt_run`，记录调用序号、模型、输入 Token、静态/动态/最终 Hash 和执行状态。
+- `ai_context_item` 只保存分区 Hash、Token、长度、预算纳入状态和脱敏占位信息；不会复制完整用户内容、附件、工具结果或密钥。
+- 完整等价输入回放仍由 `ai_context_snapshot` 负责；Prompt/Context 元数据通过用户隔离的会话接口查询。
+- 当同一 Prompt code/version 的静态内容发生变化时，运行记录标记为 `COMPLETED_WITH_DRIFT`，必须显式提升 Prompt 版本。
+
 ## 与旧架构的映射
 
 | 旧组件 | 新定位 |

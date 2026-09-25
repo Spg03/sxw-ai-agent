@@ -31,6 +31,8 @@ public class ToolGovernanceConfig {
         toolRegistry.register(ToolDefinition.readOnly("searchWeb", "网络搜索（SearchAPI）"));
         toolRegistry.register(ToolDefinition.readOnly("scrapeWebPage", "网页内容抓取"));
 
+        toolRegistry.register(ToolDefinition.readOnly("enterPlanMode", "Creates a pending plan for user review"));
+
         // LOCAL_WRITE 工具
         toolRegistry.register(ToolDefinition.localWrite("readFile", "文件读取（沙箱内）"));
         toolRegistry.register(ToolDefinition.localWrite("writeFile", "文件写入（沙箱内）"));

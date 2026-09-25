@@ -83,10 +83,16 @@ public class AuthService {
         }
 
         // revoke 旧 refresh token
-        refreshTokenRepository.revokeByTokenHash(hash);
+        if (refreshTokenRepository.revokeByTokenHash(hash) != 1) {
+            throw new IllegalArgumentException("refresh token already consumed");
+        }
+
+        UserAccount user = userAccountRepository.findByUsername(stored.username())
+                .filter(UserAccount::isEnabled)
+                .orElseThrow(() -> new IllegalArgumentException("user is disabled or not found"));
 
         // 生成新的 token 对
-        return buildAuthResponse(stored.username(), null);
+        return buildAuthResponse(stored.username(), UserView.from(user));
     }
 
     /**

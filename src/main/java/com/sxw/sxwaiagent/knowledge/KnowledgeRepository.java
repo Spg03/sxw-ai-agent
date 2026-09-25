@@ -33,26 +33,44 @@ public class KnowledgeRepository {
     /**
      * 按 content_hash 查询文档（用于增量索引去重）
      */
+    public Optional<KnowledgeDocumentRecord> findByContentHash(long userId, String hash) {
+        List<KnowledgeDocumentRecord> results = jdbcTemplate.query(
+            "SELECT doc_id, user_id, title, source_path, chunk_count, status, content_hash, " +
+            "index_fingerprint, created_at FROM ai_knowledge_document WHERE user_id=? AND content_hash = ? LIMIT 1",
+            new KnowledgeDocumentRowMapper(),
+            userId, hash
+        );
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
+    }
+
+    /** @deprecated User-scoped lookup must be used by production code. */
+    @Deprecated
     public Optional<KnowledgeDocumentRecord> findByContentHash(String hash) {
         List<KnowledgeDocumentRecord> results = jdbcTemplate.query(
-            "SELECT doc_id, title, source_path, chunk_count, status, content_hash, " +
-            "index_fingerprint, created_at FROM ai_knowledge_document WHERE content_hash = ? LIMIT 1",
-            new KnowledgeDocumentRowMapper(),
-            hash
-        );
+            "SELECT doc_id, title, source_path, chunk_count, status, content_hash, index_fingerprint, created_at FROM ai_knowledge_document WHERE content_hash = ? LIMIT 1",
+            new KnowledgeDocumentRowMapper(), hash);
         return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
     }
 
     /**
      * 按 doc_id 查询文档
      */
+    public Optional<KnowledgeDocumentRecord> findByDocId(long userId, String docId) {
+        List<KnowledgeDocumentRecord> results = jdbcTemplate.query(
+            "SELECT doc_id, user_id, title, source_path, chunk_count, status, content_hash, " +
+            "index_fingerprint, created_at FROM ai_knowledge_document WHERE doc_id = ? AND user_id=?",
+            new KnowledgeDocumentRowMapper(),
+            docId, userId
+        );
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
+    }
+
+    /** @deprecated User-scoped lookup must be used by production code. */
+    @Deprecated
     public Optional<KnowledgeDocumentRecord> findByDocId(String docId) {
         List<KnowledgeDocumentRecord> results = jdbcTemplate.query(
-            "SELECT doc_id, title, source_path, chunk_count, status, content_hash, " +
-            "index_fingerprint, created_at FROM ai_knowledge_document WHERE doc_id = ?",
-            new KnowledgeDocumentRowMapper(),
-            docId
-        );
+            "SELECT doc_id, title, source_path, chunk_count, status, content_hash, index_fingerprint, created_at FROM ai_knowledge_document WHERE doc_id = ?",
+            new KnowledgeDocumentRowMapper(), docId);
         return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
     }
 
@@ -98,34 +116,55 @@ public class KnowledgeRepository {
     /**
      * 保存文档元数据
      */
-    public String saveDocument(String title, String sourcePath, int chunkCount) {
-        return saveDocument(title, sourcePath, chunkCount, null, null);
+    public String saveDocument(long userId, String title, String sourcePath, int chunkCount) {
+        return saveDocument(userId, title, sourcePath, chunkCount, null, null);
     }
 
     /**
      * 保存文档元数据（含 content_hash）
      */
-    public String saveDocument(String title, String sourcePath, int chunkCount, String contentHash) {
-        return saveDocument(title, sourcePath, chunkCount, contentHash, null);
+    public String saveDocument(long userId, String title, String sourcePath, int chunkCount, String contentHash) {
+        return saveDocument(userId, title, sourcePath, chunkCount, contentHash, null);
     }
 
     /**
      * 保存文档元数据（含 content_hash + index_fingerprint）
      */
-    public String saveDocument(String title, String sourcePath, int chunkCount,
+    public String saveDocument(long userId, String title, String sourcePath, int chunkCount,
                                String contentHash, String indexFingerprint) {
         String docId = UUID.randomUUID().toString();
 
         jdbcTemplate.update("""
             INSERT INTO ai_knowledge_document
-                (doc_id, title, source_path, chunk_count, status, content_hash, index_fingerprint, created_at)
-            VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, ?)
+                (doc_id, user_id, title, source_path, chunk_count, status, content_hash, index_fingerprint, created_at)
+            VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)
             """,
-            docId, title, sourcePath, chunkCount, contentHash, indexFingerprint,
+            docId, userId, title, sourcePath, chunkCount, contentHash, indexFingerprint,
             Timestamp.from(Instant.now())
         );
 
         log.info("Saved document: {} ({} chunks)", docId, chunkCount);
+        return docId;
+    }
+
+    /** @deprecated Legacy global-document API; new controllers must pass userId. */
+    @Deprecated
+    public String saveDocument(String title, String sourcePath, int chunkCount) {
+        return saveDocument(title, sourcePath, chunkCount, null, null);
+    }
+
+    /** @deprecated Legacy global-document API; new controllers must pass userId. */
+    @Deprecated
+    public String saveDocument(String title, String sourcePath, int chunkCount, String contentHash) {
+        return saveDocument(title, sourcePath, chunkCount, contentHash, null);
+    }
+
+    /** @deprecated Legacy global-document API; new controllers must pass userId. */
+    @Deprecated
+    public String saveDocument(String title, String sourcePath, int chunkCount, String contentHash, String indexFingerprint) {
+        String docId = UUID.randomUUID().toString();
+        jdbcTemplate.update("INSERT INTO ai_knowledge_document (doc_id, title, source_path, chunk_count, status, content_hash, index_fingerprint, created_at) VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, ?)",
+            docId, title, sourcePath, chunkCount, contentHash, indexFingerprint, Timestamp.from(Instant.now()));
         return docId;
     }
     
@@ -189,6 +228,23 @@ public class KnowledgeRepository {
             vectorStr, vectorStr, minScore, vectorStr, topK
         );
     }
+
+    public List<KnowledgeChunkRecord> findSimilarChunks(long userId, List<String> documentIds, float[] queryEmbedding, int topK, double minScore) {
+        if (documentIds == null || documentIds.isEmpty()) return List.of();
+        String vectorStr = "[" + arrayToString(queryEmbedding) + "]";
+        String placeholders = String.join(",", java.util.Collections.nCopies(documentIds.size(), "?"));
+        List<Object> params = new java.util.ArrayList<>();
+        params.add(vectorStr); params.add(vectorStr); params.add(minScore); params.add(userId); params.addAll(documentIds); params.add(vectorStr); params.add(topK);
+        return jdbcTemplate.query("""
+            SELECT c.chunk_id, c.doc_id, c.chunk_index, c.breadcrumb, c.content, c.token_count,
+                1 - (c.embedding <=> ?::vector) as similarity
+            FROM ai_knowledge_chunk c JOIN ai_knowledge_document d ON d.doc_id=c.doc_id
+            WHERE 1 - (c.embedding <=> ?::vector) >= ? AND d.user_id=? AND c.doc_id IN (%s)
+            ORDER BY c.embedding <=> ?::vector LIMIT ?
+            """.formatted(placeholders),
+            (rs, rowNum) -> new KnowledgeChunkRecord(rs.getString("chunk_id"), rs.getString("doc_id"), rs.getInt("chunk_index"), rs.getString("breadcrumb"), rs.getString("content"), rs.getInt("token_count"), rs.getDouble("similarity")),
+            params.toArray());
+    }
     
     /**
      * 删除文档及其所有块
@@ -197,6 +253,14 @@ public class KnowledgeRepository {
         jdbcTemplate.update("DELETE FROM ai_knowledge_chunk WHERE doc_id = ?", docId);
         jdbcTemplate.update("DELETE FROM ai_knowledge_document WHERE doc_id = ?", docId);
         log.info("Deleted document: {}", docId);
+    }
+
+    /** Deletes a document only after its authenticated owner has been verified. */
+    public void deleteDocument(long userId, String docId) {
+        if (findByDocId(userId, docId).isEmpty()) {
+            throw new IllegalArgumentException("Knowledge document was not found");
+        }
+        deleteDocument(docId);
     }
     
     /**
@@ -208,6 +272,27 @@ public class KnowledgeRepository {
             "index_fingerprint, created_at FROM ai_knowledge_document ORDER BY created_at DESC",
             new KnowledgeDocumentRowMapper()
         );
+    }
+
+    /** Lists documents visible to one user only. */
+    public List<KnowledgeDocumentRecord> listDocuments(long userId) {
+        return jdbcTemplate.query(
+            "SELECT doc_id, title, source_path, chunk_count, status, content_hash, " +
+            "index_fingerprint, created_at FROM ai_knowledge_document WHERE user_id = ? ORDER BY created_at DESC",
+            new KnowledgeDocumentRowMapper(), userId
+        );
+    }
+
+    public int countOwnedDocuments(long userId, List<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) return 0;
+        String placeholders = String.join(",", java.util.Collections.nCopies(documentIds.size(), "?"));
+        List<Object> params = new java.util.ArrayList<>();
+        params.add(userId);
+        params.addAll(documentIds);
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM ai_knowledge_document WHERE user_id = ? AND doc_id IN (" + placeholders + ")",
+            Integer.class, params.toArray());
+        return count == null ? 0 : count;
     }
     
     private String arrayToString(float[] array) {
